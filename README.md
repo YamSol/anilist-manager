@@ -9,10 +9,10 @@ App em Python/Flask para atualizar priorities na sua lista do AniList
    - Client Secret
    - Configura Redirect URI como: `http://localhost:3000/callback`
 
-2. **Preenche no `app_anilist.py`** (linhas 9-10)
-   ```python
-   CLIENT_ID = "seu_client_id"
-   CLIENT_SECRET = "seu_client_secret"
+2. **Copia `.env.example` pra `.env` e preenche**
+   ```bash
+   cp .env.example .env
+   # edita .env com CLIENT_ID e CLIENT_SECRET
    ```
 
 3. **Instala dependências**
@@ -24,6 +24,7 @@ App em Python/Flask para atualizar priorities na sua lista do AniList
 
 5. **Roda**
    ```bash
+   export $(cat .env | xargs)
    python app_anilist.py
    ```
 
