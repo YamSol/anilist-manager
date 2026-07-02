@@ -1,4 +1,5 @@
 from flask import Flask, redirect, request, jsonify, url_for, session
+from dotenv import load_dotenv
 import requests
 import json
 import webbrowser
@@ -7,6 +8,8 @@ import os
 import secrets
 import html
 from threading import Timer
+
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)

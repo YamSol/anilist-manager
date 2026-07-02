@@ -24,7 +24,6 @@ App em Python/Flask para atualizar priorities na sua lista do AniList
 
 5. **Roda**
    ```bash
-   export $(cat .env | xargs)
    python app_anilist.py
    ```
 
