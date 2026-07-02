@@ -122,7 +122,7 @@ def list_anime():
         for e in seen.values()
     ]
 
-    rows_json = json.dumps(entries)
+    rows_json = json.dumps(entries).replace('</', '<\\/')
 
     html = f"""<!DOCTYPE html>
 <html lang="pt">
