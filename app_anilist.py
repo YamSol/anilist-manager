@@ -336,9 +336,13 @@ def check_list():
 
 def open_browser():
     time.sleep(1)
-    webbrowser.open('http://localhost:3000/')
+    try:
+        webbrowser.open('http://localhost:3000/')
+    except webbrowser.Error:
+        pass
 
 if __name__ == '__main__':
     print("🚀 AniList Priority Manager — http://localhost:3000/")
-    Timer(1, open_browser).start()
-    app.run(host='localhost', port=3000, debug=False)
+    if not os.environ.get("SKIP_BROWSER_OPEN"):
+        Timer(1, open_browser).start()
+    app.run(host='0.0.0.0', port=3000, debug=False)

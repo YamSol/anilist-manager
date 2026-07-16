@@ -1,0 +1,9 @@
+services:
+  anilist-updater:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./out.json:/app/out.json:ro

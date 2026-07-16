@@ -44,6 +44,21 @@ App em Python/Flask para atualizar e verificar priorities na sua lista do AniLis
    anilist-updater
    ```
 
+## Rodando com Docker
+
+Alternativa ao setup manual — não precisa de venv nem Python local.
+
+1. Cria `.env` a partir do `.env.example` (passo 4 acima) e coloca seu `out.json` na raiz.
+2. Sobe:
+   ```bash
+   docker compose up --build
+   ```
+3. Acessa `http://localhost:3000/` no navegador do host normalmente.
+
+O `out.json` é montado como volume (somente leitura), então dá pra editar ele
+sem rebuildar a imagem. Pra rodar em background: `docker compose up -d --build`.
+Pra parar: `docker compose down`.
+
 ## Como usar
 
 - O navegador abre automaticamente em `http://localhost:3000/`
@@ -56,5 +71,6 @@ App em Python/Flask para atualizar e verificar priorities na sua lista do AniLis
 
 - `app_anilist.py` — app Flask (OAuth, rotas, chamadas à API GraphQL do AniList)
 - `anilist-updater.sh` — launcher usado pelo symlink em `~/.local/bin/anilist-updater`
+- `Dockerfile` / `docker-compose.yml` — build e run em container
 - `.env` — credenciais (não versionado)
 - `out.json` — lista de referência local usada em `/check` (não versionado)
