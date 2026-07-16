@@ -1,30 +1,47 @@
 # AniList Priority Updater
 
-App em Python/Flask para atualizar priorities na sua lista do AniList
+App em Python/Flask para atualizar e verificar priorities na sua lista do AniList.
 
 ## Setup
 
-1. **Pega suas credenciais em https://anilist.co/settings/developer**
-   - Client ID
-   - Client Secret
-   - Configura Redirect URI como: `http://localhost:3000/callback`
-
-2. **Copia `.env.example` pra `.env` e preenche**
+1. **Cria e ativa a venv**
    ```bash
-   cp .env.example .env
-   # edita .env com CLIENT_ID e CLIENT_SECRET
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
-3. **Instala dependências**
+2. **Instala as dependências**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Coloca seu `out.json` na mesma pasta**
+3. **Pega suas credenciais em https://anilist.co/settings/developer**
+   - Client ID
+   - Client Secret
+   - Configura Redirect URI como: `http://localhost:3000/callback`
 
-5. **Roda**
+4. **Copia `.env.example` pra `.env` e preenche**
+   ```bash
+   cp .env.example .env
+   # edita .env com ANILIST_CLIENT_ID e ANILIST_CLIENT_SECRET
+   ```
+
+5. **Coloca seu `out.json` na raiz do projeto** (lista de referência usada em `/check`)
+   ```json
+   [
+     {"id": 12345, "name": "Nome do anime", "priority": 3}
+   ]
+   ```
+
+6. **Roda**
    ```bash
    python app_anilist.py
+   ```
+
+   Ou, se preferir usar o launcher instalado (`~/.local/bin/anilist-updater`, symlink
+   que aponta pra `anilist-updater.sh` deste diretório e roda com o Python da venv):
+   ```bash
+   anilist-updater
    ```
 
 ## Como usar
@@ -32,6 +49,12 @@ App em Python/Flask para atualizar priorities na sua lista do AniList
 - O navegador abre automaticamente em `http://localhost:3000/`
 - Redireciona pra AniList pra você aceitar o acesso
 - Autoriza e volta pro app
-- Acessa `http://localhost:3000/update` pra rodar a atualização
-- Vê o resultado na tela
+- Acessa `http://localhost:3000/list` pra editar priorities
+- Acessa `http://localhost:3000/check` pra comparar contra o `out.json`
 
+## Estrutura
+
+- `app_anilist.py` — app Flask (OAuth, rotas, chamadas à API GraphQL do AniList)
+- `anilist-updater.sh` — launcher usado pelo symlink em `~/.local/bin/anilist-updater`
+- `.env` — credenciais (não versionado)
+- `out.json` — lista de referência local usada em `/check` (não versionado)
