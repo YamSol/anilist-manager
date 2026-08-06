@@ -1,6 +1,49 @@
+# Contexto do build de deploy/Dockerfile (a raiz do repositório).
+# Entra só o que `npm ci` e `vite build` precisam.
+
+# Dependências e artefatos: reinstalados/regerados dentro da imagem, e copiar o
+# node_modules do host quebraria os binários nativos de plataforma.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+**/coverage/
+.vite/
+*.tsbuildinfo
+
+# Testes e relatórios
+playwright-report/
+test-results/
+**/playwright-report/
+**/test-results/
+.svelte-kit/
+
+# Git, CI e ferramentas de agente
+.git/
+.gitignore
+.gitattributes
+.husky/
+.claude/
+.build.yml
+
+# Documentação — não afeta o bundle, mas invalidaria o cache de camada a cada edição
+docs/
+README.md
+CLAUDE.md
+
+# Legado Python, removido numa fase posterior
 venv/
 __pycache__/
 *.pyc
+app_anilist.py
+requirements.txt
+anilist-updater.sh
+Dockerfile
+docker-compose.yml
+
+# Dados e credenciais do usuário — nunca devem entrar numa imagem
 .env
+.env.*
 out.json
-.git/
+*.snapshot.json

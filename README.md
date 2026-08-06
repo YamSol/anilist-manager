@@ -1,76 +1,246 @@
-# AniList Priority Updater
+# AniList Manager
 
-App em Python/Flask para atualizar e verificar priorities na sua lista do AniList.
+Gerenciador da sua lista de animes do [AniList](https://anilist.co). Roda inteiro no
+navegador, sem backend: fala direto com a API GraphQL pública e não guarda nada fora do
+seu dispositivo.
 
-## Setup
+Uma origem única em TypeScript (`packages/core`) alimenta todos os formatos de
+distribuição — site estático, PWA instalável e container Docker.
 
-1. **Cria e ativa a venv**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+> **Nota:** o projeto foi reescrito na v2. Se você usava a versão em Python/Flask, leia
+> [Migrando da v1](#migrando-da-v1) antes.
 
-2. **Instala as dependências**
-   ```bash
-   pip install -r requirements.txt
-   ```
+---
 
-3. **Pega suas credenciais em https://anilist.co/settings/developer**
-   - Client ID
-   - Client Secret
-   - Configura Redirect URI como: `http://localhost:3000/callback`
+## O que ele faz
 
-4. **Copia `.env.example` pra `.env` e preenche**
-   ```bash
-   cp .env.example .env
-   # edita .env com ANILIST_CLIENT_ID e ANILIST_CLIENT_SECRET
-   ```
+| Escopo                          | O que é                                                                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Autenticação**                | Login no AniList sem servidor e sem segredo, ou colando um access token na mão.                                                               |
+| **Listar, organizar e filtrar** | Uma linha por anime (mesmo que ele esteja em várias listas), com filtro facetado por formato, status, prioridade, gênero, lista e score.      |
+| **Converter a escala**          | Migração da escala antiga de prioridade para a nova, com preview e backup obrigatórios.                                                       |
+| **Snapshot / diff**             | Importar uma lista de referência `[{id, name, priority}]`, comparar com a conta viva e ver o que divergiu, o que sumiu e o que está sem nota. |
 
-5. **Coloca seu `out.json` na raiz do projeto** (lista de referência usada em `/check`)
-   ```json
-   [
-     {"id": 12345, "name": "Nome do anime", "priority": 3}
-   ]
-   ```
+O contrato completo — cada requisito e o teste que o comprova — está em
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 
-6. **Roda**
-   ```bash
-   python app_anilist.py
-   ```
+---
 
-   Ou, se preferir usar o launcher instalado (`~/.local/bin/anilist-updater`, symlink
-   que aponta pra `anilist-updater.sh` deste diretório e roda com o Python da venv):
-   ```bash
-   anilist-updater
-   ```
+## A conversão de escala
+
+Esse é o motivo principal da v2, e é a operação mais perigosa do app.
+
+|         | Escala antiga     | Escala nova (a partir da v2) |
+| ------- | ----------------- | ---------------------------- |
+| **1**   | prioridade mínima | **prioridade máxima**        |
+| **5**   | prioridade máxima | prioridade mínima            |
+| **0**   | sem prioridade    | sem prioridade               |
+| Fórmula | —                 | `nova = 6 - antiga`          |
+
+A escala nova é a convenção de rank de todo mundo: "prioridade 1" é o que você quer ver
+primeiro. A conversão inverte os valores `1..5` e deixa o `0` intacto.
+
+**É uma migração de mão única.** A operação não é idempotente: aplicar duas vezes não
+desfaz nada, apenas re-inverte tudo de volta. Por isso a tela de conversão impõe:
+
+1. **Preview obrigatório.** Abrir a tela não escreve nada. Você vê antes/depois de cada
+   entrada, separadas em alteradas, inalteradas (o `3`, que é ponto fixo) e ignoradas
+   (as `0`).
+2. **Backup obrigatório.** O botão de aplicar só destrava depois de exportar o JSON do
+   estado atual. Esse arquivo é o único caminho de volta.
+3. **Aviso de reaplicação.** Se o app já registrou uma conversão nesta conta, ele exige
+   uma confirmação extra.
+
+A aplicação é em lote, com barra de progresso e botão de cancelar. Uma falha individual
+não aborta o resto — no fim você recebe a lista do que não passou.
+
+---
+
+## Setup de desenvolvimento
+
+Requer **Node >= 20.19** (a série 22 é a usada no CI e na imagem Docker).
+
+```bash
+npm install
+npm run dev
+```
+
+O Vite sobe em <http://localhost:5173>.
+
+### Scripts
+
+| Script                  | O que faz                                                            |
+| ----------------------- | -------------------------------------------------------------------- |
+| `npm run dev`           | Servidor de desenvolvimento com HMR, na porta 5173.                  |
+| `npm run build`         | Compila o core e gera `apps/web/dist/`.                              |
+| `npm run preview`       | Serve o `dist/` já buildado na porta 3000.                           |
+| `npm test`              | Testes unitários e de componente (vitest).                           |
+| `npm run test:watch`    | Idem, em modo watch.                                                 |
+| `npm run test:coverage` | Testes com cobertura e o threshold de 90% do core.                   |
+| `npm run test:e2e`      | Testes de ponta a ponta (playwright).                                |
+| `npm run lint`          | ESLint em todo o repositório.                                        |
+| `npm run lint:fix`      | ESLint com `--fix`.                                                  |
+| `npm run format`        | Prettier em todo o repositório.                                      |
+| `npm run typecheck`     | `tsc --noEmit` no core e `svelte-check` na web.                      |
+| `npm run verify`        | `lint` + `typecheck` + `test:coverage` + `build`. É o que o CI roda. |
+
+---
+
+## Obtendo o Client ID
+
+O app não vem com credenciais embutidas: **cada pessoa usa o Client ID dela**, informado
+na primeira execução e guardado só no navegador. É isso que permite distribuir o mesmo
+`dist/` e a mesma imagem Docker para qualquer um.
+
+1. Entre em <https://anilist.co/settings/developer> e crie uma nova aplicação.
+2. Em **Redirect URI**, coloque a origem exata onde o app roda:
+
+   | Onde você roda     | Redirect URI                          |
+   | ------------------ | ------------------------------------- |
+   | `npm run dev`      | `http://localhost:5173`               |
+   | Docker / `preview` | `http://localhost:3000`               |
+   | Hospedado          | a URL pública, ex. `https://seu.site` |
+
+   Sem barra no fim e sem caminho — é a origem, não uma rota. Se você usa mais de um
+   ambiente, cadastre uma aplicação para cada um (o AniList aceita só um Redirect URI
+   por aplicação).
+
+3. Copie o **Client ID** (o número) e cole na tela de configuração do app.
+
+**Não existe client secret.** O login usa _implicit grant_ (`response_type=token`): o
+AniList devolve o token no fragmento da URL, o app lê, guarda localmente e limpa a barra
+de endereços. Um segredo não teria como ser protegido num app que roda inteiro no
+navegador, então ele simplesmente não faz parte do desenho — e o campo "Client Secret"
+da página do AniList pode ser ignorado.
+
+Se o redirect não for uma opção (rede fechada, ambiente exótico), dá para colar um
+access token direto na tela de login.
+
+---
 
 ## Rodando com Docker
 
-Alternativa ao setup manual — não precisa de venv nem Python local.
+A imagem é um nginx servindo o `dist/` estático — nenhum backend, nenhuma variável de
+ambiente, nenhum volume.
 
-1. Cria `.env` a partir do `.env.example` (passo 4 acima) e coloca seu `out.json` na raiz.
-2. Sobe:
-   ```bash
-   docker compose up --build
-   ```
-3. Acessa `http://localhost:3000/` no navegador do host normalmente.
+```bash
+docker compose -f deploy/docker-compose.yml up --build
+```
 
-O `out.json` é montado como volume (somente leitura), então dá pra editar ele
-sem rebuildar a imagem. Pra rodar em background: `docker compose up -d --build`.
-Pra parar: `docker compose down`.
+Acesse <http://localhost:3000>. Para rodar em background use `-d`; para parar,
+`docker compose -f deploy/docker-compose.yml down`.
 
-## Como usar
+Sem o compose:
 
-- O navegador abre automaticamente em `http://localhost:3000/`
-- Redireciona pra AniList pra você aceitar o acesso
-- Autoriza e volta pro app
-- Acessa `http://localhost:3000/list` pra editar priorities
-- Acessa `http://localhost:3000/check` pra comparar contra o `out.json`
+```bash
+docker build -f deploy/Dockerfile -t anilist-manager .
+docker run --rm -p 3000:8080 anilist-manager
+```
 
-## Estrutura
+O container escuta na 8080 e roda como usuário não-root; a porta publicada no host
+continua sendo a 3000, igual à v1. Lembre de cadastrar `http://localhost:3000` como
+Redirect URI da sua aplicação no AniList.
 
-- `app_anilist.py` — app Flask (OAuth, rotas, chamadas à API GraphQL do AniList)
-- `anilist-updater.sh` — launcher usado pelo symlink em `~/.local/bin/anilist-updater`
-- `Dockerfile` / `docker-compose.yml` — build e run em container
-- `.env` — credenciais (não versionado)
-- `out.json` — lista de referência local usada em `/check` (não versionado)
+---
+
+## Instalando como PWA
+
+O build gera manifest e service worker: a casca do app funciona offline (as chamadas à
+API do AniList, não — dado de lista desatualizado é pior que um erro explícito). O app
+se atualiza sozinho quando você recarrega com uma versão nova publicada.
+
+Instalação requer **HTTPS**, com `localhost` como exceção.
+
+- **Android / Chrome:** menu ⋮ → _Instalar aplicativo_ (ou _Adicionar à tela inicial_).
+- **iOS / Safari:** botão de compartilhar → _Adicionar à Tela de Início_.
+- **Desktop (Chrome, Edge, Brave):** ícone de instalar na barra de endereços, ou
+  menu ⋮ → _Instalar_.
+- **Firefox desktop:** não instala PWA; use como aba normal.
+
+---
+
+## Estrutura do repositório
+
+```
+packages/core/      lógica de domínio — a origem única
+apps/web/           interface Svelte 5 + Vite 7
+deploy/             Dockerfile, nginx.conf, compose e o gerador de ícones
+docs/REQUIREMENTS.md contrato normativo do projeto
+```
+
+| Pacote          | Papel                                                                                                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core` | TypeScript puro: modelo, prioridades, filtros, cliente GraphQL, snapshot/diff, lote. **Sem DOM e sem I/O** — `fetch`, relógio e `sleep` são injetados. É o que permite testar tempo e rede de forma determinística, e o que vai permitir reusar tudo num CLI. |
+| `apps/web`      | Svelte 5 + Vite 7 + ag-grid. Componentes, estado e persistência em `localStorage`. Gera o `dist/` estático que vira site, PWA e container.                                                                                                                    |
+| `deploy`        | Tudo que empacota o `dist/`. `gen-icons.mjs` regenera os PNGs do PWA a partir da mesma arte do `favicon.svg`, sem dependência de build.                                                                                                                       |
+
+Só dois pacotes de propósito: Capacitor e um eventual build de arquivo único reempacotam
+o _output_ de `apps/web`, não componentes soltos — um `packages/ui` separado seria
+cerimônia sem consumidor.
+
+---
+
+## Testes
+
+```bash
+npm test              # unitários + componentes
+npm run test:coverage # com o gate de 90% do core
+npm run test:e2e      # ponta a ponta
+```
+
+Três camadas:
+
+- **`packages/core`** roda em Node puro, sem jsdom. É assim que a regra "o core não toca
+  em DOM" fica verificável: qualquer acesso a `window` ou `document` estoura no teste.
+  Cobertura mínima de 90% de linhas, travada por threshold — abaixo disso o build falha.
+- **`apps/web`** roda em jsdom com Testing Library. As chamadas de rede são interceptadas
+  por MSW, então nenhum teste toca a API de verdade.
+- **E2E** com Playwright. Fica fora do CI: os browsers do Playwright são binários glibc e
+  não rodam na imagem alpine do builds.sr.ht.
+
+Todo requisito de `docs/REQUIREMENTS.md` tem pelo menos um teste apontando para ele, e o
+teste entra no mesmo commit do código.
+
+---
+
+## Migrando da v1
+
+A v1 era um único script Flask (`app_anilist.py`) que subia um servidor local, guardava
+Client ID **e Client Secret** num `.env` e comparava sua lista contra um `out.json` num
+caminho fixo. Nada disso existe mais:
+
+| v1                                   | v2                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| Servidor Flask em `localhost:3000`   | Nada roda no seu computador — o app é o próprio navegador.              |
+| `.env` com `ANILIST_CLIENT_SECRET`   | Não há secret. Só o Client ID, informado na interface.                  |
+| `out.json` lido da raiz do projeto   | Snapshot importado por seletor de arquivo, de onde você quiser.         |
+| Redirect URI `.../callback`          | Redirect URI é a origem: `http://localhost:3000`, sem caminho.          |
+| `docker compose up` com volume e env | `docker compose -f deploy/docker-compose.yml up`, sem volume e sem env. |
+
+**Seu `out.json` continua valendo** — abra a tela de snapshot e importe o arquivo. Só
+lembre que ele está na **escala antiga**: marque a opção _"este snapshot está na escala
+antiga"_ no diff, senão cada entrada vai aparecer como divergente. Com a opção ligada, um
+snapshot pré-conversão comparado contra uma conta já convertida dá zero divergências.
+
+Os arquivos do Python ainda estão versionados e serão removidos numa fase posterior.
+
+---
+
+## Backlog
+
+Fora desta versão, mas viabilizados pela arquitetura:
+
+- **APK Android** via Capacitor, reempacotando o mesmo `dist/`, com redirect por custom
+  scheme (`anilistmgr://auth`) para preservar o implicit grant.
+- **HTML de arquivo único** via `vite-plugin-singlefile` — essencialmente um segundo
+  config de build.
+- **CLI Node** consumindo `packages/core` direto, para automação em lote e cron.
+- **Suporte a MANGA** (`MediaListCollection(type: MANGA)`), que usa a mesma API.
+- **Desktop nativo** via Tauri.
+- Edição de outros campos além de `priority` (score, progresso, status, notas).
+
+---
+
+## Licença
+
+MIT.

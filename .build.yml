@@ -1,0 +1,49 @@
+image: alpine/latest
+packages:
+  - nodejs
+  - npm
+sources:
+  - https://git.sr.ht/~yamsol/anilist-updater
+environment:
+  PROJECT: anilist-updater
+  # Não há hooks de git para instalar no CI.
+  HUSKY: 0
+  CI: 'true'
+tasks:
+  - versions: |
+      cd "$PROJECT"
+      node --version
+      npm --version
+      # package.json exige node >=20.19; alpine/latest entrega a série 22.
+      node -e 'process.exit(process.versions.node.split(".").map(Number)[0] >= 20 ? 0 : 1)'
+
+  - install: |
+      cd "$PROJECT"
+      npm ci --no-audit --no-fund
+
+  - lint: |
+      cd "$PROJECT"
+      npm run lint
+
+  - typecheck: |
+      cd "$PROJECT"
+      npm run typecheck
+
+  - test: |
+      cd "$PROJECT"
+      # RNF-08: o threshold de cobertura do core está no vitest.config.ts —
+      # abaixo de 90% de linhas esta tarefa falha sozinha.
+      npm run test:coverage
+
+  - build: |
+      cd "$PROJECT"
+      npm run build
+      # RNF-06: bundle inicial < 500 KB gzip. O relatório do vite já mostra o
+      # tamanho; aqui fica o total do dist/ como sanity check no log.
+      du -sh apps/web/dist
+      ls -la apps/web/dist
+
+# O E2E (playwright) fica de fora de propósito: os browsers distribuídos pelo
+# playwright são binários glibc e não rodam em alpine/musl. Rodar `npm run
+# test:e2e` localmente, ou criar um manifesto separado em debian/stable com
+# `npx playwright install --with-deps` se algum dia valer o custo de build.
