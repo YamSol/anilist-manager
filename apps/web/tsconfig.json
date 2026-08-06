@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "vite-plugin-pwa/client"],
+    "allowJs": true,
+    "checkJs": true,
+
+    // Espelha o alias do vite.config.ts: o core é consumido do FONTE, nunca do
+    // dist/. Sem isso o typecheck exigiria um build prévio do core e o HMR
+    // pararia na fronteira do pacote.
+    "baseUrl": ".",
+    "paths": {
+      "@anilist-updater/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "tests/**/*.ts",
+    "vite.config.ts",
+    "svelte.config.js"
+  ]
+}

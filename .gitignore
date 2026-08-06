@@ -1,5 +1,27 @@
+# Node / monorepo
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Testes
+playwright-report/
+test-results/
+.svelte-kit/
+
+# Ferramentas
+.husky/_/
+
+# Ambiente
+.env
+.env.local
+
+# Dados do usuário (snapshots pessoais)
+out.json
+*.snapshot.json
+
+# Legado Python (removido na fase 3)
 venv/
 __pycache__/
 *.pyc
-.env
-out.json
