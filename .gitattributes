@@ -1,0 +1,10 @@
+# Normaliza tudo para LF no repositório — o build roda em Linux (Docker/CI) e o
+# desenvolvimento em Windows. Sem isso, worktrees paralelos geram diffs falsos.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
