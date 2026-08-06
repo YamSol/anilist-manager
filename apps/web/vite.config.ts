@@ -14,6 +14,25 @@ import { VitePWA } from 'vite-plugin-pwa';
  * O core é resolvido direto do fonte: sem passo de build intermediário no dev,
  * e o HMR atravessa a fronteira do pacote.
  */
+/**
+ * Proxy de troca de token (AD-10).
+ *
+ * O AniList não manda CORS no `/oauth/token` — verificado: o preflight OPTIONS
+ * responde 404 e o POST volta sem `Access-Control-Allow-Origin`. Sem este proxy de
+ * mesma origem, o browser não consegue trocar o authorization code, e o login só
+ * funcionaria colando o token à mão.
+ *
+ * O equivalente em produção está em `deploy/nginx.conf`; os dois precisam expor o
+ * mesmo caminho, que o core conhece como `TOKEN_PROXY_PATH`.
+ */
+const TOKEN_PROXY = {
+  '/oauth/token': {
+    target: 'https://anilist.co',
+    changeOrigin: true,
+    rewrite: () => '/api/v2/oauth/token',
+  },
+} as const;
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -74,10 +93,12 @@ export default defineConfig({
 
   server: {
     port: 5173,
+    proxy: TOKEN_PROXY,
   },
 
   preview: {
     port: 3000,
+    proxy: TOKEN_PROXY,
   },
 
   test: {

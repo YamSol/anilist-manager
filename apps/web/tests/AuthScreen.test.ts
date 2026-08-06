@@ -23,7 +23,7 @@ vi.mock('@anilist-updater/core', async (importOriginal) => ({
 
 const AuthScreen = (await import('../src/routes/AuthScreen.svelte')).default;
 const { createAuth } = await import('../src/lib/auth.svelte.js');
-const { loadClientId } = await import('../src/lib/tokenStore.js');
+const { loadClientId, loadClientSecret } = await import('../src/lib/tokenStore.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,20 +43,33 @@ describe('AuthScreen', () => {
     expect(screen.getByText(`${location.origin}${location.pathname}`)).toBeInTheDocument();
   });
 
-  it('RF-01: o Client ID digitado é persistido ao entrar', async () => {
+  it('RF-01: as credenciais digitadas são persistidas ao entrar', async () => {
     const user = userEvent.setup();
     const redirect = vi.fn();
     render(AuthScreen, { auth: createAuth({ redirect }) });
 
     await user.type(screen.getByLabelText('Client ID'), '24680');
+    await user.type(screen.getByLabelText('Client Secret'), 'segredo');
     await user.click(screen.getByRole('button', { name: 'Entrar com AniList' }));
 
+    // Precisam estar salvos ANTES do redirect: na volta a página é outra, e a
+    // troca do código depende do secret.
     expect(loadClientId()).toBe('24680');
+    expect(loadClientSecret()).toBe('segredo');
     expect(redirect).toHaveBeenCalledOnce();
   });
 
   it('RF-01: sem Client ID o botão de entrar fica desabilitado', () => {
     render(AuthScreen, { auth: createAuth({ redirect: vi.fn() }) });
+
+    expect(screen.getByRole('button', { name: 'Entrar com AniList' })).toBeDisabled();
+  });
+
+  it('RF-02: com Client ID mas sem Secret o botão continua desabilitado', async () => {
+    const user = userEvent.setup();
+    render(AuthScreen, { auth: createAuth({ redirect: vi.fn() }) });
+
+    await user.type(screen.getByLabelText('Client ID'), '24680');
 
     expect(screen.getByRole('button', { name: 'Entrar com AniList' })).toBeDisabled();
   });

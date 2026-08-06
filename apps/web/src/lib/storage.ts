@@ -11,7 +11,15 @@
 export const STORAGE_KEYS = {
   /** Client ID do AniList informado pelo usuário (RF-01). É configuração, não credencial. */
   clientId: 'anilist.clientId',
-  /** Token do implicit grant (RF-03). Apagado ao sair (RF-06). */
+  /**
+   * Client Secret do client que o USUÁRIO registrou (RF-02).
+   *
+   * Não é um segredo da aplicação — é a credencial dele, do client dele, e nunca
+   * sai do dispositivo a não ser para o próprio AniList, via proxy (AD-10, RNF-02).
+   * Fica junto do token e é apagado ao sair (RF-06).
+   */
+  clientSecret: 'anilist.clientSecret',
+  /** Access token do authorization code grant (RF-03). Apagado ao sair (RF-06). */
   token: 'anilist.token',
   /** Estado dos filtros facetados (RF-16). */
   filter: 'anilist.filter',

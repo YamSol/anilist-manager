@@ -67,12 +67,22 @@ com `0` intacto.
 código pode aplicá-la sem preview, sem backup exportado e sem a guarda de reaplicação
 (RF-21, RF-23, RF-26). Cuidado ao mexer em qualquer coisa que escreva prioridade em lote.
 
-### Sem client secret, nunca
+### Nenhum segredo NOSSO, nunca
 
-Não existe backend e não existe segredo — nem no código, nem no build, nem em arquivo
-versionado, nem em variável de ambiente, nem "só para testar". O login é implicit grant
-e o Client ID é informado pelo usuário em runtime. Um grep por `client_secret` no
-repositório precisa continuar voltando vazio (RNF-02).
+Não existe backend e não existe credencial da aplicação — nem no código, nem no build, nem
+em arquivo versionado, nem em variável de ambiente, nem "só para testar". Client ID e
+Client Secret são **do usuário**, do client que ele registrou, informados em runtime e
+guardados só no `localStorage` dele (RNF-02, AD-06).
+
+O login é **authorization code grant**, não implicit. Isso não é escolha, é medição: o
+AniList responde `unsupported_grant_type` a `response_type=token`, e o endpoint de token
+não manda CORS (`OPTIONS` → 404). Por isso a troca do código passa por um **proxy de mesma
+origem** em `/oauth/token`, declarado em dois lugares que precisam continuar iguais:
+`apps/web/vite.config.ts` (dev e preview) e `deploy/nginx.conf` (container). O core conhece
+o caminho como `TOKEN_PROXY_PATH`.
+
+Antes de "simplificar" isso de volta para implicit grant, releia AD-10 no REQUIREMENTS: já
+foi tentado, e não funciona.
 
 ### `docs/REQUIREMENTS.md` §5 é contrato congelado
 

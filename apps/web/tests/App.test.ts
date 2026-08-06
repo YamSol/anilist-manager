@@ -1,8 +1,8 @@
 /**
  * Casca da aplicação: portão de autenticação e roteamento por hash.
  *
- * O caso que mais importa é o RF-03: o token chega no MESMO fragmento que o
- * roteador usa, e o boot precisa consumi-lo antes de rotear.
+ * O caso que mais importa é o RF-03: o retorno do OAuth chega em `?code=…` na
+ * query e precisa ser trocado por um token antes de a aplicação abrir.
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -11,8 +11,8 @@ import userEvent from '@testing-library/user-event';
 import type * as Core from '@anilist-updater/core';
 import type { StoredToken } from '@anilist-updater/core';
 
-const { parseTokenFragment, isTokenExpired } = vi.hoisted(() => ({
-  parseTokenFragment: vi.fn<(fragment: string, now: number) => StoredToken | null>(),
+const { exchangeCodeForToken, isTokenExpired } = vi.hoisted(() => ({
+  exchangeCodeForToken: vi.fn<() => Promise<StoredToken>>(),
   isTokenExpired: vi.fn<() => boolean>(),
 }));
 
@@ -20,7 +20,7 @@ vi.mock('@anilist-updater/core', async (importOriginal) => {
   const actual = await importOriginal<typeof Core>();
   return {
     ...actual,
-    parseTokenFragment,
+    exchangeCodeForToken,
     isTokenExpired,
     // O cliente real nem é construído nos testes da casca.
     AniListClient: class {
@@ -39,7 +39,8 @@ vi.mock('@anilist-updater/core', async (importOriginal) => {
 
 const { SAMPLE_ENTRIES } = await import('../src/lib/fixtures.js');
 const App = (await import('../src/App.svelte')).default;
-const { createTokenStore, saveClientId, loadClientId } = await import('../src/lib/tokenStore.js');
+const { createTokenStore, saveClientId, loadClientId, saveClientSecret, loadClientSecret } =
+  await import('../src/lib/tokenStore.js');
 
 const TOKEN: StoredToken = {
   accessToken: 'tok-abc',
@@ -50,7 +51,8 @@ const TOKEN: StoredToken = {
 beforeEach(() => {
   vi.clearAllMocks();
   isTokenExpired.mockReturnValue(false);
-  parseTokenFragment.mockReturnValue(null);
+  exchangeCodeForToken.mockResolvedValue(TOKEN);
+  history.replaceState(null, '', '/');
 });
 
 describe('App', () => {
@@ -61,9 +63,9 @@ describe('App', () => {
     expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
   });
 
-  it('RF-03: o token do fragmento é consumido no boot e a URL fica limpa', async () => {
-    history.replaceState(null, '', '/#access_token=tok-abc&token_type=Bearer&expires_in=31536000');
-    parseTokenFragment.mockReturnValue(TOKEN);
+  it('RF-03: o code da query é trocado por token no boot e a URL fica limpa', async () => {
+    saveClientSecret('segredo');
+    history.replaceState(null, '', '/?code=code-abc');
 
     render(App, {});
 
@@ -71,12 +73,13 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('navigation', { name: 'Seções' })).toBeInTheDocument();
     });
+    expect(location.search).toBe('');
+    expect(location.href).not.toContain('code=');
     expect(location.hash).toBe('#/lista');
-    expect(location.href).not.toContain('access_token');
     expect(createTokenStore().load()).toEqual(TOKEN);
   });
 
-  it('RF-03: um hash de rota comum leva à tela certa, sem virar login', async () => {
+  it('RF-03: sem code na query, nenhuma troca é tentada', async () => {
     createTokenStore().save(TOKEN);
     history.replaceState(null, '', '/#/converter');
 
@@ -87,7 +90,33 @@ describe('App', () => {
         screen.getByRole('heading', { name: 'Converter a escala de prioridade' }),
       ).toBeInTheDocument();
     });
-    expect(parseTokenFragment).not.toHaveBeenCalled();
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it('AD-10: sem proxy, a falha da troca leva a colar token em vez de tela branca', async () => {
+    const { TokenExchangeUnavailableError } = await import('@anilist-updater/core');
+    saveClientSecret('segredo');
+    exchangeCodeForToken.mockRejectedValue(new TokenExchangeUnavailableError('sem proxy'));
+    history.replaceState(null, '', '/?code=code-abc');
+
+    render(App, {});
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Access token')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(location.search).toBe('');
+  });
+
+  it('RF-03: recusa do usuário no AniList vira mensagem, não travamento', async () => {
+    history.replaceState(null, '', '/?error=access_denied&error_description=Voce+recusou');
+
+    render(App, {});
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Voce recusou');
+    });
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
   });
 
   it('navega entre as três telas pelo hash', async () => {
@@ -116,6 +145,7 @@ describe('App', () => {
   it('RF-06: sair volta ao login e preserva o Client ID', async () => {
     const user = userEvent.setup();
     saveClientId('13579');
+    saveClientSecret('segredo-que-deve-sumir');
     createTokenStore().save(TOKEN);
     render(App, {});
 
@@ -131,6 +161,8 @@ describe('App', () => {
     expect(createTokenStore().load()).toBeNull();
     expect(loadClientId()).toBe('13579');
     expect(screen.getByLabelText('Client ID')).toHaveValue('13579');
+    // RF-06: o secret é credencial e some junto com o token; o Client ID, não.
+    expect(loadClientSecret()).toBe('');
   });
 
   it('RF-10: autenticado, carrega a lista e mostra a grid', async () => {

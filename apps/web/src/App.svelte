@@ -3,14 +3,15 @@
    * Casca da aplicação: consome o retorno do OAuth, decide entre login e app,
    * e roteia entre as três telas.
    *
-   * A ORDEM DO BOOT IMPORTA (RF-03). O implicit grant devolve o token no mesmo
-   * fragmento que usamos para rotear. Então:
-   *   1. `consumeAuthFragment` lê `#access_token=…`, persiste e troca o hash por `#/lista`;
-   *   2. só depois `createAuth` lê o storage e `createRouter` lê o hash.
-   * Inverter esses passos faria o roteador ver um fragmento de OAuth e o token
-   * sobrar na barra de endereços.
+   * O retorno do OAuth chega em `?code=…` na QUERY, não no fragmento — o code
+   * grant não disputa o hash com o roteador (ao contrário do implicit grant, que
+   * o AniList não suporta; ver o cabeçalho de `packages/core/src/auth.ts`).
+   *
+   * Em compensação a troca do código é uma chamada de rede, então o boot é
+   * assíncrono: `createAuth` monta primeiro a partir do storage, e o desfecho do
+   * callback é aplicado quando a troca termina.
    */
-  import { consumeAuthFragment, createAuth } from './lib/auth.svelte.js';
+  import { consumeAuthCallback, createAuth } from './lib/auth.svelte.js';
   import { createRouter } from './lib/router.svelte.js';
   import { createSession } from './lib/session.svelte.js';
   import { createTokenStore } from './lib/tokenStore.js';
@@ -21,12 +22,19 @@
   import SnapshotScreen from './routes/SnapshotScreen.svelte';
 
   const store = createTokenStore();
-
-  // Passo 1 — antes de qualquer leitura de rota.
-  consumeAuthFragment(store);
-
-  // Passo 2 — o token que acabou de ser salvo é o que `createAuth` encontra.
   const auth = createAuth({ store });
+
+  // A troca do código roda em paralelo à montagem; enquanto ela não volta, a tela
+  // de login fica visível com o aviso de "trocando o código".
+  let exchanging = $state(location.search.includes('code='));
+
+  void consumeAuthCallback(store)
+    .then((outcome) => {
+      if (outcome !== null) auth.applyCallback(outcome);
+    })
+    .finally(() => {
+      exchanging = false;
+    });
   const session = createSession({
     // RF-05: um 401 desloga e leva de volta ao login com o motivo na tela.
     onAuthError: (message) => {
@@ -65,7 +73,7 @@
 </script>
 
 {#if !auth.authenticated}
-  <AuthScreen {auth} />
+  <AuthScreen {auth} {exchanging} />
 {:else}
   <header class="bar">
     <h1>AniList Manager</h1>

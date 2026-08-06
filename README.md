@@ -86,11 +86,11 @@ O Vite sobe em <http://localhost:5173>.
 
 ---
 
-## Obtendo o Client ID
+## Obtendo as credenciais
 
-O app não vem com credenciais embutidas: **cada pessoa usa o Client ID dela**, informado
-na primeira execução e guardado só no navegador. É isso que permite distribuir o mesmo
-`dist/` e a mesma imagem Docker para qualquer um.
+O app não vem com credenciais embutidas: **cada pessoa registra o client dela**, informa
+na primeira execução e tudo fica guardado só no navegador. É isso que permite distribuir o
+mesmo `dist/` e a mesma imagem Docker para qualquer um.
 
 1. Entre em <https://anilist.co/settings/developer> e crie uma nova aplicação.
 2. Em **Redirect URI**, coloque a origem exata onde o app roda:
@@ -105,16 +105,39 @@ na primeira execução e guardado só no navegador. É isso que permite distribu
    ambiente, cadastre uma aplicação para cada um (o AniList aceita só um Redirect URI
    por aplicação).
 
-3. Copie o **Client ID** (o número) e cole na tela de configuração do app.
+3. Copie o **Client ID** e o **Client Secret** e cole na tela de configuração do app.
 
-**Não existe client secret.** O login usa _implicit grant_ (`response_type=token`): o
-AniList devolve o token no fragmento da URL, o app lê, guarda localmente e limpa a barra
-de endereços. Um segredo não teria como ser protegido num app que roda inteiro no
-navegador, então ele simplesmente não faz parte do desenho — e o campo "Client Secret"
-da página do AniList pode ser ignorado.
+### Por que o Client Secret é necessário
 
-Se o redirect não for uma opção (rede fechada, ambiente exótico), dá para colar um
-access token direto na tela de login.
+A intenção original era usar _implicit grant_, que dispensaria o secret. **Não funciona:**
+o AniList não habilita esse fluxo — `response_type=token` responde
+`{"error":"unsupported_grant_type"}`. E o endpoint de troca de token não manda CORS
+(`OPTIONS` responde 404), então o navegador também não consegue trocar o código sozinho.
+
+O desenho atual contorna as duas coisas: o login é _authorization code grant_, e a troca do
+código passa por um **proxy de mesma origem** que o servidor de desenvolvimento e o
+container já fornecem em `/oauth/token`.
+
+O secret que você cola é **do seu próprio client**, não da aplicação:
+
+- fica no `localStorage` do seu navegador e em nenhum outro lugar;
+- é apagado quando você sai (o Client ID permanece, porque é configuração);
+- só trafega da sua máquina para o AniList, pelo proxy — que não registra o corpo em log;
+- não existe nenhum segredo versionado no repositório nem embutido no build.
+
+### Hospedagem estática, sem proxy
+
+Num host que serve só arquivos (GitHub Pages, sr.ht pages) não há proxy, e o app detecta
+isso: em vez de falhar, ele passa a pedir um **access token colado**. Você faz a troca uma
+vez por fora e cola o resultado — o token do AniList vale um ano.
+
+```bash
+curl -X POST https://anilist.co/api/v2/oauth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"grant_type":"authorization_code",
+       "client_id":"SEU_ID","client_secret":"SEU_SECRET",
+       "redirect_uri":"https://seu.site","code":"O_CODE_DA_URL"}'
+```
 
 ---
 
@@ -209,13 +232,13 @@ A v1 era um único script Flask (`app_anilist.py`) que subia um servidor local, 
 Client ID **e Client Secret** num `.env` e comparava sua lista contra um `out.json` num
 caminho fixo. Nada disso existe mais:
 
-| v1                                   | v2                                                                      |
-| ------------------------------------ | ----------------------------------------------------------------------- |
-| Servidor Flask em `localhost:3000`   | Nada roda no seu computador — o app é o próprio navegador.              |
-| `.env` com `ANILIST_CLIENT_SECRET`   | Não há secret. Só o Client ID, informado na interface.                  |
-| `out.json` lido da raiz do projeto   | Snapshot importado por seletor de arquivo, de onde você quiser.         |
-| Redirect URI `.../callback`          | Redirect URI é a origem: `http://localhost:3000`, sem caminho.          |
-| `docker compose up` com volume e env | `docker compose -f deploy/docker-compose.yml up`, sem volume e sem env. |
+| v1                                   | v2                                                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Servidor Flask em `localhost:3000`   | Nada roda no seu computador — o app é o próprio navegador.                                          |
+| `.env` com `ANILIST_CLIENT_SECRET`   | Nenhum segredo versionado. Client ID e Secret são informados na interface e ficam no seu navegador. |
+| `out.json` lido da raiz do projeto   | Snapshot importado por seletor de arquivo, de onde você quiser.                                     |
+| Redirect URI `.../callback`          | Redirect URI é a origem: `http://localhost:3000`, sem caminho.                                      |
+| `docker compose up` com volume e env | `docker compose -f deploy/docker-compose.yml up`, sem volume e sem env.                             |
 
 **Seu `out.json` continua valendo** — abra a tela de snapshot e importe o arquivo. Só
 lembre que ele está na **escala antiga**: marque a opção _"este snapshot está na escala
@@ -231,7 +254,8 @@ Os arquivos do Python ainda estão versionados e serão removidos numa fase post
 Fora desta versão, mas viabilizados pela arquitetura:
 
 - **APK Android** via Capacitor, reempacotando o mesmo `dist/`, com redirect por custom
-  scheme (`anilistmgr://auth`) para preservar o implicit grant.
+  scheme (`anilistmgr://auth`). Como não há proxy dentro do APK, ou ele embarca um
+  pequeno handler nativo para a troca do código, ou usa o caminho de colar token.
 - **HTML de arquivo único** via `vite-plugin-singlefile` — essencialmente um segundo
   config de build.
 - **CLI Node** consumindo `packages/core` direto, para automação em lote e cron.

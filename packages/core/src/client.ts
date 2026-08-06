@@ -14,7 +14,7 @@ import {
   VIEWER_QUERY,
 } from './queries.js';
 
-export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+import type { Fetcher } from './http.js';
 
 export interface AniListClientOptions {
   readonly token: string;

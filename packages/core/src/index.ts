@@ -9,6 +9,7 @@
  */
 
 export * from './errors.js';
+export * from './http.js';
 export * from './model.js';
 export * from './priority.js';
 export * from './auth.js';

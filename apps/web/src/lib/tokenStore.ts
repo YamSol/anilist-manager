@@ -55,3 +55,21 @@ export function loadClientId(): string {
 export function saveClientId(clientId: string): void {
   writeRaw(STORAGE_KEYS.clientId, clientId.trim());
 }
+
+/**
+ * Ver RF-02. O Client Secret do client do próprio usuário.
+ *
+ * Diferente do Client ID, é credencial: some no logout (RF-06). Não existe default
+ * de build — nenhum secret é embutido no artefato (RNF-02, AD-06).
+ */
+export function loadClientSecret(): string {
+  return readRaw(STORAGE_KEYS.clientSecret)?.trim() ?? '';
+}
+
+export function saveClientSecret(clientSecret: string): void {
+  writeRaw(STORAGE_KEYS.clientSecret, clientSecret.trim());
+}
+
+export function clearClientSecret(): void {
+  removeRaw(STORAGE_KEYS.clientSecret);
+}

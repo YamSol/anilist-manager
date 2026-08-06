@@ -1,31 +1,32 @@
 /**
  * Escopo A — autenticação (RF-01 a RF-06).
  *
- * `packages/core` ainda é stub nesta branch: `parseTokenFragment`,
- * `buildAuthorizeUrl` e `isTokenExpired` lançam. Mockamos só essas três funções,
- * preservando o resto do módulo, para exercitar a camada web contra o contrato
- * congelado em docs/REQUIREMENTS.md §5.4.
+ * As funções do core viram espiãs para que estes testes verifiquem a *fiação* da
+ * camada web — quem é chamado, com quê, e o que a UI faz com o resultado. O
+ * comportamento das funções em si é coberto em `packages/core/src/auth.test.ts`.
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type * as Core from '@anilist-updater/core';
 import type { StoredToken } from '@anilist-updater/core';
+import { AuthError, TokenExchangeUnavailableError } from '@anilist-updater/core';
 
-const { buildAuthorizeUrl, parseTokenFragment, isTokenExpired } = vi.hoisted(() => ({
+const { buildAuthorizeUrl, exchangeCodeForToken, isTokenExpired } = vi.hoisted(() => ({
   buildAuthorizeUrl: vi.fn<(config: { clientId: string; redirectUri: string }) => string>(),
-  parseTokenFragment: vi.fn<(fragment: string, now: number) => StoredToken | null>(),
+  exchangeCodeForToken: vi.fn<() => Promise<StoredToken>>(),
   isTokenExpired: vi.fn<(token: StoredToken, now: number) => boolean>(),
 }));
 
 vi.mock('@anilist-updater/core', async (importOriginal) => ({
   ...(await importOriginal<typeof Core>()),
   buildAuthorizeUrl,
-  parseTokenFragment,
+  exchangeCodeForToken,
   isTokenExpired,
 }));
 
-const { consumeAuthFragment, createAuth } = await import('../src/lib/auth.svelte.js');
-const { createTokenStore, loadClientId } = await import('../src/lib/tokenStore.js');
+const { consumeAuthCallback, createAuth } = await import('../src/lib/auth.svelte.js');
+const { createTokenStore, loadClientId, saveClientSecret, loadClientSecret } =
+  await import('../src/lib/tokenStore.js');
 const { STORAGE_KEYS } = await import('../src/lib/storage.js');
 
 const TOKEN: StoredToken = {
@@ -37,10 +38,8 @@ const TOKEN: StoredToken = {
 beforeEach(() => {
   vi.clearAllMocks();
   isTokenExpired.mockReturnValue(false);
-  buildAuthorizeUrl.mockReturnValue(
-    'https://anilist.co/api/v2/oauth/authorize?response_type=token',
-  );
-  parseTokenFragment.mockReturnValue(null);
+  buildAuthorizeUrl.mockReturnValue('https://anilist.co/api/v2/oauth/authorize?response_type=code');
+  exchangeCodeForToken.mockResolvedValue(TOKEN);
   history.replaceState(null, '', '/');
 });
 
@@ -76,19 +75,31 @@ describe('RF-01: Client ID informado pelo usuário', () => {
   });
 });
 
-describe('RF-02: implicit grant sem secret', () => {
+describe('RF-02: authorization code grant', () => {
   it('RF-02: entrar monta a URL de autorização com o redirect URI da origem', () => {
     const redirect = vi.fn();
     const auth = createAuth({ store: createTokenStore(), redirect });
 
     auth.setClientId('12345');
+    auth.setClientSecret('segredo');
     auth.login();
 
     expect(buildAuthorizeUrl).toHaveBeenCalledWith({
       clientId: '12345',
       redirectUri: `${location.origin}${location.pathname}`,
     });
-    expect(redirect).toHaveBeenCalledWith(expect.stringContaining('response_type=token'));
+    expect(redirect).toHaveBeenCalledWith(expect.stringContaining('response_type=code'));
+  });
+
+  it('RNF-02: o secret não vai na URL de autorização — só na troca do código', () => {
+    const redirect = vi.fn();
+    const auth = createAuth({ store: createTokenStore(), redirect });
+
+    auth.setClientId('12345');
+    auth.setClientSecret('segredo-do-usuario');
+    auth.login();
+
+    expect(redirect).toHaveBeenCalledWith(expect.not.stringContaining('segredo-do-usuario'));
   });
 
   it('RF-02: sem Client ID não há redirect, e sim uma mensagem', () => {
@@ -100,38 +111,87 @@ describe('RF-02: implicit grant sem secret', () => {
     expect(redirect).not.toHaveBeenCalled();
     expect(auth.message).toBe('Informe o Client ID antes de entrar.');
   });
+
+  it('RF-02: sem Client Secret também não há redirect — a troca do código exige o secret', () => {
+    const redirect = vi.fn();
+    const auth = createAuth({ store: createTokenStore(), redirect });
+
+    auth.setClientId('12345');
+    auth.login();
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(auth.message).toContain('Client Secret');
+  });
 });
 
-describe('RF-03: token no fragmento da URL', () => {
-  it('RF-03: o fragmento é lido, o token é salvo e a URL fica limpa', () => {
-    history.replaceState(null, '', '/#access_token=tok-abc&token_type=Bearer&expires_in=31536000');
-    parseTokenFragment.mockReturnValue(TOKEN);
+describe('RF-03: retorno do OAuth na query', () => {
+  it('RF-03: o code é trocado por token, salvo, e a URL fica limpa', async () => {
+    history.replaceState(null, '', '/?code=code-abc');
+    saveClientSecret('segredo');
+    exchangeCodeForToken.mockResolvedValue(TOKEN);
 
     const store = createTokenStore();
-    const token = consumeAuthFragment(store, 1_000);
+    const outcome = await consumeAuthCallback(store);
 
-    expect(token).toEqual(TOKEN);
+    expect(outcome?.token).toEqual(TOKEN);
     expect(store.load()).toEqual(TOKEN);
-    // O access token não pode sobrar na barra de endereços.
+    // Nem o code nem o token podem sobrar na barra de endereços.
+    expect(location.search).toBe('');
     expect(location.hash).toBe('#/lista');
-    expect(location.href).not.toContain('access_token');
   });
 
-  it('RF-03: um hash de rota comum não é confundido com retorno de OAuth', () => {
+  it('RF-03: uma rota comum não é confundida com retorno de OAuth', async () => {
     history.replaceState(null, '', '/#/converter');
 
-    expect(consumeAuthFragment(createTokenStore(), 1_000)).toBeNull();
-    expect(parseTokenFragment).not.toHaveBeenCalled();
+    expect(await consumeAuthCallback(createTokenStore())).toBeNull();
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
     // A rota do usuário é preservada intacta.
     expect(location.hash).toBe('#/converter');
   });
 
-  it('RF-03: fragmento sem token reconhecível não autentica nem limpa a rota', () => {
-    history.replaceState(null, '', '/#access_token=');
-    parseTokenFragment.mockReturnValue(null);
+  it('RF-03: recusa do usuário vira mensagem sem tentar trocar nada', async () => {
+    history.replaceState(null, '', '/?error=access_denied&error_description=Voce+recusou');
 
-    expect(consumeAuthFragment(createTokenStore(), 1_000)).toBeNull();
+    const outcome = await consumeAuthCallback(createTokenStore());
+
+    expect(outcome?.token).toBeNull();
+    expect(outcome?.message).toBe('Voce recusou');
+    expect(outcome?.needsManualToken).toBe(false);
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it('AD-10: sem proxy, o desfecho pede o token colado em vez de culpar o usuário', async () => {
+    history.replaceState(null, '', '/?code=code-abc');
+    saveClientSecret('segredo');
+    exchangeCodeForToken.mockRejectedValue(new TokenExchangeUnavailableError('sem proxy'));
+
+    const outcome = await consumeAuthCallback(createTokenStore());
+
+    expect(outcome?.token).toBeNull();
+    expect(outcome?.needsManualToken).toBe(true);
     expect(createTokenStore().load()).toBeNull();
+  });
+
+  it('RF-05: credencial recusada NÃO vira pedido de token colado', async () => {
+    history.replaceState(null, '', '/?code=code-abc');
+    saveClientSecret('segredo-errado');
+    exchangeCodeForToken.mockRejectedValue(new AuthError('Client authentication failed'));
+
+    const outcome = await consumeAuthCallback(createTokenStore());
+
+    // A distinção importa: aqui o caminho é corrigir o secret, não colar token.
+    expect(outcome?.needsManualToken).toBe(false);
+    expect(outcome?.message).toBeTruthy();
+  });
+
+  it('RF-03: sem secret guardado, a troca nem é tentada', async () => {
+    history.replaceState(null, '', '/?code=code-abc');
+
+    const outcome = await consumeAuthCallback(createTokenStore());
+
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
+    expect(outcome?.needsManualToken).toBe(true);
+    expect(location.search).toBe('');
   });
 });
 
@@ -179,6 +239,7 @@ describe('RF-06: sair', () => {
     const auth = createAuth({ store });
 
     auth.setClientId('12345');
+    auth.setClientSecret('segredo');
     auth.pasteToken('tok-abc');
     expect(auth.authenticated).toBe(true);
 
@@ -190,5 +251,9 @@ describe('RF-06: sair', () => {
     expect(auth.clientId).toBe('12345');
     expect(loadClientId()).toBe('12345');
     expect(localStorage.getItem(STORAGE_KEYS.clientId)).toBe('12345');
+    // O Client Secret É credencial e some junto com o token.
+    expect(auth.clientSecret).toBe('');
+    expect(loadClientSecret()).toBe('');
+    expect(localStorage.getItem(STORAGE_KEYS.clientSecret)).toBeNull();
   });
 });

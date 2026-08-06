@@ -2,32 +2,45 @@
   /**
    * Tela de setup e login. Escopo A: RF-01 a RF-06.
    *
-   * Nenhuma decisão de OAuth acontece aqui — `buildAuthorizeUrl` e
-   * `parseTokenFragment` são do core. Esta tela só coleta o Client ID, dispara o
-   * redirect e oferece o caminho alternativo de colar o token (RF-04).
+   * Nenhuma decisão de OAuth acontece aqui — `buildAuthorizeUrl`,
+   * `parseAuthCallback` e `exchangeCodeForToken` são do core. Esta tela só coleta
+   * as credenciais do client do usuário, dispara o redirect e oferece o caminho
+   * alternativo de colar o token (RF-04).
    */
   import type { Auth } from '../lib/auth.svelte.js';
   import { currentRedirectUri } from '../lib/auth.svelte.js';
 
   interface Props {
     auth: Auth;
+    /** `true` enquanto a troca do authorization code está em voo. */
+    exchanging?: boolean;
   }
 
-  const { auth }: Props = $props();
+  const { auth, exchanging = false }: Props = $props();
 
-  // Cópia local editável: o campo é rascunho até o submit persistir (RF-01).
+  // Cópias locais editáveis: os campos são rascunho até o submit persistir (RF-01).
   // svelte-ignore state_referenced_locally
   let clientIdField = $state(auth.clientId);
+  // svelte-ignore state_referenced_locally
+  let clientSecretField = $state(auth.clientSecret);
   let pastedToken = $state('');
-  let showPasteField = $state(false);
+  let pasteRequested = $state(false);
+  /**
+   * Sem proxy na hospedagem, colar token deixa de ser alternativa e vira o caminho.
+   * Precisa ser derivado: `manualTokenOnly` só fica verdadeiro quando a troca do
+   * código falha, o que acontece **depois** desta tela montar.
+   */
+  const showPasteField = $derived(pasteRequested || auth.manualTokenOnly);
 
   const redirectUri = currentRedirectUri();
-  const clientIdReady = $derived(clientIdField.trim() !== '');
+  const credentialsReady = $derived(clientIdField.trim() !== '' && clientSecretField.trim() !== '');
 
   function handleLogin(event: SubmitEvent): void {
     event.preventDefault();
-    // RF-01: o Client ID é persistido antes do redirect, senão ele se perde na volta.
+    // RF-01/RF-02: as credenciais são persistidas antes do redirect — na volta,
+    // a troca do código precisa do secret e a página já foi recarregada.
     auth.setClientId(clientIdField);
+    auth.setClientSecret(clientSecretField);
     auth.login();
   }
 
@@ -53,7 +66,7 @@
   {/if}
 
   <section class="card">
-    <h2>1. Informe seu Client ID</h2>
+    <h2>1. Credenciais do seu client</h2>
     <ol class="howto">
       <li>
         Crie um client em
@@ -65,7 +78,7 @@
         Configure o <strong>Redirect URI</strong> exatamente como:
         <code class="redirect">{redirectUri}</code>
       </li>
-      <li>Copie o <strong>Client ID</strong> gerado e cole abaixo.</li>
+      <li>Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> e cole abaixo.</li>
     </ol>
 
     <form onsubmit={handleLogin}>
@@ -79,20 +92,42 @@
         placeholder="12345"
         bind:value={clientIdField}
       />
+
+      <label for="client-secret">Client Secret</label>
+      <input
+        id="client-secret"
+        name="clientSecret"
+        type="password"
+        autocomplete="off"
+        placeholder="••••••••••••••••"
+        bind:value={clientSecretField}
+      />
       <p class="hint">
-        Fica guardado só neste navegador. Sair da conta não apaga o Client ID — ele é configuração,
-        não credencial.
+        O AniList não permite login sem a troca do código, e essa troca exige o secret. Ele é do
+        <em>seu</em> client, fica só neste navegador e é apagado quando você sai. O Client ID, que é configuração
+        e não credencial, permanece.
       </p>
-      <button class="primary" type="submit" disabled={!clientIdReady}>Entrar com AniList</button>
+
+      <button class="primary" type="submit" disabled={!credentialsReady || exchanging}>
+        {exchanging ? 'Trocando o código…' : 'Entrar com AniList'}
+      </button>
     </form>
   </section>
 
   <section class="card">
     <h2>2. Ou cole um access token</h2>
-    <p class="hint">
-      Alternativa ao redirect, útil se você já tem um token em mãos ou se o redirect não puder ser
-      configurado.
-    </p>
+    {#if auth.manualTokenOnly}
+      <p class="hint">
+        Esta hospedagem serve só arquivos estáticos, sem o proxy que a troca do código exige — o
+        AniList não libera CORS no endpoint de token. Faça a troca você mesmo (o token vale um ano)
+        e cole o resultado aqui.
+      </p>
+    {:else}
+      <p class="hint">
+        Alternativa ao redirect, útil se você já tem um token em mãos ou se o redirect não puder ser
+        configurado.
+      </p>
+    {/if}
 
     {#if showPasteField}
       <form onsubmit={handlePaste}>
@@ -112,7 +147,7 @@
         class="ghost"
         type="button"
         onclick={() => {
-          showPasteField = true;
+          pasteRequested = true;
         }}
       >
         Colar token manualmente

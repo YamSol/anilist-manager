@@ -26,6 +26,17 @@ export class RateLimitError extends AniListError {
 /** Falha de transporte: sem rede, DNS, timeout. */
 export class NetworkError extends AniListError {}
 
+/**
+ * O endpoint de troca de token não está disponível nesta hospedagem.
+ *
+ * O AniList não manda CORS no `/oauth/token`, então o browser só consegue trocar
+ * o code por token através de um proxy de mesma origem (ver AD-10). Num host
+ * estático puro esse proxy não existe, e a UI precisa cair para o fluxo de colar
+ * token (RF-04). É um erro de *ambiente*, não de credencial — daí não ser
+ * `AuthError`: a distinção é o que decide qual tela mostrar.
+ */
+export class TokenExchangeUnavailableError extends AniListError {}
+
 /** A resposta chegou com status 200 mas o corpo trouxe `errors`. */
 export class GraphQLError extends AniListError {
   readonly errors: readonly { readonly message: string }[];
