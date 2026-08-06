@@ -32,16 +32,6 @@ docs/
 README.md
 CLAUDE.md
 
-# Legado Python, removido numa fase posterior
-venv/
-__pycache__/
-*.pyc
-app_anilist.py
-requirements.txt
-anilist-updater.sh
-Dockerfile
-docker-compose.yml
-
 # Dados e credenciais do usuário — nunca devem entrar numa imagem
 .env
 .env.*
