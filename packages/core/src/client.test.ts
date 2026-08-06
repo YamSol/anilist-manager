@@ -512,6 +512,25 @@ describe('AniListClient — construção', () => {
     expect(() => new AniListClient({ token: 't' })).not.toThrow();
   });
 
+  it('RNF-04: sem sleep injetado, o backoff usa setTimeout e não trava o retry', async () => {
+    let chamadas = 0;
+    server.use(
+      http.post(ENDPOINT, () => {
+        chamadas++;
+        if (chamadas === 1) {
+          // Retry-After: 0 exercita o sleep real sem custar tempo de teste.
+          return new HttpResponse(null, { status: 429, headers: { 'Retry-After': '0' } });
+        }
+        return HttpResponse.json({ data: { ok: true } });
+      }),
+    );
+
+    const client = new AniListClient({ token: 't', maxRetries: 1 });
+
+    await expect(client.request('query { a }')).resolves.toEqual({ ok: true });
+    expect(chamadas).toBe(2);
+  });
+
   it('RNF-03: o fetcher injetado é usado no lugar do global', async () => {
     const fetcher = vi.fn(async (): Promise<Response> =>
       Promise.resolve(Response.json({ data: { ok: true } })),
