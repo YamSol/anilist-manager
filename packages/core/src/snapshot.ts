@@ -85,6 +85,17 @@ export function toSnapshot(entries: readonly AnimeEntry[]): Snapshot {
   return entries.map((entry) => ({ id: entry.id, name: entry.title, priority: entry.priority }));
 }
 
+/**
+ * Ver RF-35. As pendências da conta: entradas ainda sem prioridade.
+ *
+ * Independe de snapshot. Existe separada de `SnapshotDiff.unset` porque RF-35 é
+ * sobre a conta, não sobre uma comparação — exigir um snapshot importado para
+ * chegar nessa lista seria acoplar dois escopos diferentes.
+ */
+export function unsetEntries(entries: readonly AnimeEntry[]): AnimeEntry[] {
+  return entries.filter((entry) => entry.priority === PRIORITY_UNSET);
+}
+
 export interface DiffRow {
   readonly id: number;
   readonly name: string;
@@ -147,6 +158,6 @@ export function diffSnapshot(
     matched,
     mismatched,
     missing,
-    unset: entries.filter((entry) => entry.priority === PRIORITY_UNSET),
+    unset: unsetEntries(entries),
   };
 }

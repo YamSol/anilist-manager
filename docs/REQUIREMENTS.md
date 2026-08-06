@@ -202,7 +202,16 @@ export function comparePriority(a: Priority, b: Priority): number;
  * e viola RF-17. Toda ordenação decrescente de prioridade deve usar esta função.
  */
 export function comparePriorityDesc(a: Priority, b: Priority): number;
+```
 
+> ⚠️ **Ordenadores que negam o comparador** (ag-grid e a maioria dos grids) não podem
+> usar `comparePriorityDesc`: eles recebem **um só** comparador e invertem o sinal do
+> retorno por conta própria, o que jogaria o `0` para o topo. Nesse caso, passe
+> `comparePriority` e desfaça a negação **apenas nos pares que envolvem `0`` — ver
+`apps/web/src/lib/grid.ts`. `comparePriorityDesc` serve para ordenadores que aceitam
+um comparador por direção (`Array.prototype.sort` direto, por exemplo).
+
+```ts
 export interface ConversionChange {
   readonly id: number;
   readonly title: string;
@@ -264,6 +273,16 @@ export interface StoredToken {
 
 /** RF-03. `now` injetado (RNF-03). Retorna null se o fragmento não tiver token. */
 export function parseTokenFragment(fragment: string, now: number): StoredToken | null;
+
+/** Validade documentada dos tokens do AniList: 1 ano. */
+export const ANILIST_TOKEN_TTL_MS: number;
+
+/**
+ * RF-04. Constrói um `StoredToken` a partir de um token colado à mão.
+ * A política de expiração do token colado é decidida aqui, uma vez, e não
+ * reinventada por cada cliente (web, CLI, APK). Lança se o token vier em branco.
+ */
+export function tokenFromAccessToken(accessToken: string, now: number, ttlMs?: number): StoredToken;
 
 export function isTokenExpired(token: StoredToken, now: number): boolean;
 
@@ -386,6 +405,13 @@ export type Snapshot = readonly SnapshotItem[];
 export function parseSnapshot(json: unknown): Snapshot;
 
 export function toSnapshot(entries: readonly AnimeEntry[]): Snapshot; // RF-32
+
+/**
+ * RF-35. As pendências da conta: entradas com prioridade 0.
+ * Independe de snapshot — exigir um arquivo importado para chegar nessa lista
+ * acoplaria dois escopos diferentes. `SnapshotDiff.unset` reusa esta função.
+ */
+export function unsetEntries(entries: readonly AnimeEntry[]): AnimeEntry[];
 
 export interface DiffRow {
   readonly id: number;

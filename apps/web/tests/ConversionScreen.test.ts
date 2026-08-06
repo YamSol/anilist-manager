@@ -8,14 +8,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import type * as Core from '@anilist-updater/core';
 import type { AniListClient, Priority } from '@anilist-updater/core';
-
-vi.mock('@anilist-updater/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof Core>();
-  const { makeFakeCore } = await import('./fakeCore.js');
-  return { ...actual, ...makeFakeCore(actual) };
-});
 
 const ConversionScreen = (await import('../src/routes/ConversionScreen.svelte')).default;
 const { SAMPLE_ENTRIES } = await import('../src/lib/fixtures.js');

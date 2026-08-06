@@ -61,8 +61,14 @@ export function errorMessage(error: unknown): string {
         return 'Falha de rede ao falar com o AniList. Verifique sua conexão.';
       case 'GraphQLError':
         return `O AniList recusou a requisição: ${error.message}`;
-      case 'SnapshotParseError':
-        return `Snapshot inválido: ${error.message}`;
+      case 'SnapshotParseError': {
+        // RF-31 pede que a mensagem APONTE o item problemático. O caminho vive em
+        // `SnapshotParseError.at` (`$[3].priority`); sem ele o usuário só sabe que
+        // algo está errado, não onde — inútil num arquivo de dezenas de entradas.
+        const at = (error as { at?: unknown }).at;
+        const onde = typeof at === 'string' && at !== '$' ? ` (em ${at})` : '';
+        return `Snapshot inválido${onde}: ${error.message}`;
+      }
       default:
         return error.message;
     }

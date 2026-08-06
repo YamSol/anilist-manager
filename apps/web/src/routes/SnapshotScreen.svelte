@@ -14,6 +14,7 @@
     diffSnapshot,
     parseSnapshot,
     toSnapshot,
+    unsetEntries,
     type Snapshot,
     type SnapshotDiff,
   } from '@anilist-updater/core';
@@ -39,7 +40,7 @@
   );
 
   /** RF-35. Independe de haver snapshot: são as pendências da conta. */
-  const unset = $derived(session.entries.filter((entry) => entry.priority === 0));
+  const unset = $derived(unsetEntries(session.entries));
 
   async function importFile(event: Event): Promise<void> {
     const input = event.currentTarget as HTMLInputElement;

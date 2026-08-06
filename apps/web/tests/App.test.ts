@@ -18,10 +18,8 @@ const { parseTokenFragment, isTokenExpired } = vi.hoisted(() => ({
 
 vi.mock('@anilist-updater/core', async (importOriginal) => {
   const actual = await importOriginal<typeof Core>();
-  const { makeFakeCore } = await import('./fakeCore.js');
   return {
     ...actual,
-    ...makeFakeCore(actual),
     parseTokenFragment,
     isTokenExpired,
     // O cliente real nem é construído nos testes da casca.

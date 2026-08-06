@@ -9,14 +9,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import type * as Core from '@anilist-updater/core';
-
-vi.mock('@anilist-updater/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof Core>();
-  const { makeFakeCore } = await import('./fakeCore.js');
-  return { ...actual, ...makeFakeCore(actual) };
-});
-
 const SnapshotScreen = (await import('../src/routes/SnapshotScreen.svelte')).default;
 const { SAMPLE_ENTRIES } = await import('../src/lib/fixtures.js');
 const { createSession } = await import('../src/lib/session.svelte.js');
@@ -123,7 +115,9 @@ describe('SnapshotScreen', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/Snapshot inválido/);
     });
-    expect(screen.getByRole('alert')).toHaveTextContent(/priority.*0\.\.5/);
+    // RF-31 exige apontar QUAL item está errado, não só que algo está.
+    expect(screen.getByRole('alert')).toHaveTextContent(/\$\[1\]\.priority/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/inteiro de 0 a 5/);
   });
 
   it('RF-31: raiz que não é lista também é recusada com mensagem', async () => {
@@ -133,7 +127,7 @@ describe('SnapshotScreen', () => {
     await user.upload(fileInput(), jsonFile('ruim.json', '{"nao":"e uma lista"}'));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/precisa ser uma lista/);
+      expect(screen.getByRole('alert')).toHaveTextContent(/raiz do snapshot precisa ser um array/);
     });
   });
 

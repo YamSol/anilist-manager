@@ -8,20 +8,19 @@
  * conta real, nem em CI nem na máquina de ninguém — o único endpoint que a
  * aplicação chama é `graphql.anilist.co`, e ele nunca sai da máquina daqui.
  *
- * ═══ POR QUE ESTÁ `skip` NESTA BRANCH ═══
- * `packages/core` ainda é o esqueleto de contrato: `AniListClient.request`,
- * `normalizeCollection` e `planConversion` lançam `notImplemented`. Com o core
- * em stub, a lista nunca chega a renderizar e este teste falharia por um motivo
- * que não é dele.
- *
- * FASE 2 (depois do merge de `feat/core`): trocar `test.describe.skip` por
- * `test.describe` e rodar `npm run test:e2e`. Nada mais precisa mudar — as
- * rotas mockadas abaixo já respondem no formato que a `LIST_QUERY` espera.
  */
 
 import { expect, test, type Page } from '@playwright/test';
 
-const GRAPHQL = '**/graphql.anilist.co';
+/**
+ * Casa por HOST, não por glob de caminho.
+ *
+ * `'**\/graphql.anilist.co'` parece equivalente mas não é: a URL efetiva sai com
+ * barra final (`https://graphql.anilist.co/`), o glob não casa, e a requisição
+ * **vaza para a API real** — foi exatamente o que aconteceu antes desta correção.
+ * Um teste que silenciosamente chama a internet é pior que um teste vermelho.
+ */
+const GRAPHQL = (url: URL): boolean => url.hostname === 'graphql.anilist.co';
 
 /** Resposta de `VIEWER_QUERY`. */
 const VIEWER_RESPONSE = { data: { Viewer: { id: 4242 } } };
@@ -134,6 +133,19 @@ const LIST_RESPONSE = {
  * Qualquer requisição não prevista devolve erro em vez de vazar para a rede.
  */
 async function mockAniList(page: Page): Promise<void> {
+  // Trava de segurança: qualquer host externo que não seja o endpoint mockado é
+  // abortado. Sem isso, um matcher errado volta a vazar para a rede em silêncio.
+  await page.route(
+    (url) => url.hostname !== 'localhost' && url.hostname !== '127.0.0.1',
+    async (route) => {
+      if (GRAPHQL(new URL(route.request().url()))) {
+        await route.fallback();
+        return;
+      }
+      await route.abort('blockedbyclient');
+    },
+  );
+
   await page.route(GRAPHQL, async (route) => {
     const body = route.request().postDataJSON() as { query?: string } | null;
     const query = body?.query ?? '';
@@ -157,7 +169,7 @@ async function mockAniList(page: Page): Promise<void> {
   });
 }
 
-test.describe.skip('caminho crítico (ligado na fase 2, quando o core sair do stub)', () => {
+test.describe('caminho crítico', () => {
   test.beforeEach(async ({ page }) => {
     await mockAniList(page);
     await page.goto('/');
@@ -180,9 +192,11 @@ test.describe.skip('caminho crítico (ligado na fase 2, quando o core sair do st
 
     // RF-22: as contagens do plano, sem nenhuma escrita ter acontecido.
     await page.getByRole('link', { name: 'Converter escala' }).click();
-    await expect(page.getByText('alteradas').locator('..')).toContainText('1');
-    await expect(page.getByText('inalteradas').locator('..')).toContainText('1');
-    await expect(page.getByText('ignoradas', { exact: false }).locator('..')).toContainText('1');
+    // `exact` importa aqui: sem ele, "alteradas" também casa dentro de
+    // "inalteradas" e o locator vira ambíguo.
+    await expect(page.getByText('alteradas', { exact: true }).locator('..')).toContainText('1');
+    await expect(page.getByText('inalteradas', { exact: true }).locator('..')).toContainText('1');
+    await expect(page.getByText('ignoradas (prioridade 0)').locator('..')).toContainText('1');
 
     // RF-23: aplicar continua travado enquanto o backup não sair.
     await expect(page.getByRole('button', { name: 'Aplicar no AniList' })).toBeDisabled();

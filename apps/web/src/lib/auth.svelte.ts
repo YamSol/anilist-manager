@@ -10,14 +10,12 @@ import {
   buildAuthorizeUrl,
   isTokenExpired,
   parseTokenFragment,
+  tokenFromAccessToken,
   type StoredToken,
   type TokenStore,
 } from '@anilist-updater/core';
 import { createTokenStore, loadClientId, saveClientId } from './tokenStore.js';
 import { DEFAULT_ROUTE, routeHref } from './router.js';
-
-/** Um token colado à mão não traz expiração; adotamos o padrão do AniList. */
-const PASTED_TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 /** O Redirect URI registrado no AniList precisa ser exatamente a origem do app. */
 export function currentRedirectUri(): string {
@@ -119,16 +117,15 @@ export function createAuth(options: AuthOptions = {}) {
      * o 401 (RF-05) ser a verdade final sobre a validade do token.
      */
     pasteToken(accessToken: string): boolean {
-      const trimmed = accessToken.trim();
-      if (trimmed === '') {
+      // A política de expiração de um token colado é do core (RF-04), para que
+      // web, CLI e APK não inventem prazos diferentes cada um.
+      let value: StoredToken;
+      try {
+        value = tokenFromAccessToken(accessToken, now());
+      } catch {
         message = 'Cole um access token válido.';
         return false;
       }
-      const value: StoredToken = {
-        accessToken: trimmed,
-        tokenType: 'Bearer',
-        expiresAt: now() + PASTED_TOKEN_LIFETIME_MS,
-      };
       token = value;
       message = null;
       store.save(value);

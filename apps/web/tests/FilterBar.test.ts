@@ -5,17 +5,10 @@
  * mergeia — ver o cabeçalho daquele arquivo.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import type * as Core from '@anilist-updater/core';
 import type { FilterState } from '@anilist-updater/core';
-
-vi.mock('@anilist-updater/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof Core>();
-  const { makeFakeCore } = await import('./fakeCore.js');
-  return { ...actual, ...makeFakeCore(actual) };
-});
 
 const FilterBar = (await import('../src/components/FilterBar.svelte')).default;
 const { SAMPLE_ENTRIES } = await import('../src/lib/fixtures.js');

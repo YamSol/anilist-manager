@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { SnapshotParseError } from './errors.js';
 import type { AnimeEntry, Priority } from './model.js';
-import { diffSnapshot, parseSnapshot, toSnapshot, type Snapshot } from './snapshot.js';
+import {
+  diffSnapshot,
+  parseSnapshot,
+  toSnapshot,
+  unsetEntries,
+  type Snapshot,
+} from './snapshot.js';
 
 /**
  * Afirma que `parseSnapshot` rejeita a entrada com um `SnapshotParseError`
@@ -251,5 +257,37 @@ describe('diffSnapshot', () => {
 
     expect(diff.matched).toBe(1);
     expect(diff.rows[0]?.actual).toBe(0);
+  });
+});
+
+describe('unsetEntries (RF-35)', () => {
+  it('RF-35: devolve só as entradas com prioridade 0', () => {
+    const entradas = [makeEntry(1, 0), makeEntry(2, 3), makeEntry(3, 0), makeEntry(4, 1)];
+
+    expect(unsetEntries(entradas).map((e) => e.id)).toEqual([1, 3]);
+  });
+
+  it('RF-35: preserva a ordem de entrada', () => {
+    const entradas = [makeEntry(9, 0), makeEntry(2, 0), makeEntry(5, 0)];
+
+    expect(unsetEntries(entradas).map((e) => e.id)).toEqual([9, 2, 5]);
+  });
+
+  it('RF-35: lista sem pendências devolve vazio', () => {
+    expect(unsetEntries([makeEntry(1, 1), makeEntry(2, 5)])).toEqual([]);
+  });
+
+  it('RF-35: não muta a lista recebida', () => {
+    const entradas = [makeEntry(1, 0), makeEntry(2, 3)];
+
+    unsetEntries(entradas);
+
+    expect(entradas).toHaveLength(2);
+  });
+
+  it('RF-35: concorda com o campo unset do diff', () => {
+    const entradas = [makeEntry(1, 0), makeEntry(2, 3), makeEntry(3, 0)];
+
+    expect(diffSnapshot([], entradas).unset).toEqual(unsetEntries(entradas));
   });
 });

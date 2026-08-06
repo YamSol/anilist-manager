@@ -78,6 +78,36 @@ export function parseTokenFragment(fragment: string, now: number): StoredToken |
   };
 }
 
+/**
+ * Validade documentada dos tokens do AniList: um ano.
+ *
+ * Diferente de `DEFAULT_TOKEN_TTL_MS`: lá o valor é desconhecido e a hora curta é
+ * uma proteção; aqui o valor é sabido, só não veio junto com o token.
+ */
+export const ANILIST_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Ver RF-04. Constrói um `StoredToken` a partir de um access token colado à mão.
+ *
+ * Existe para que a política de expiração de um token colado seja **uma só**,
+ * decidida aqui, e não reinventada por cada cliente (web, CLI, APK). A autoridade
+ * final continua sendo o 401 da API — este prazo é só o palpite local.
+ *
+ * Lança `AniListError` se o token estiver em branco.
+ */
+export function tokenFromAccessToken(
+  accessToken: string,
+  now: number,
+  ttlMs: number = ANILIST_TOKEN_TTL_MS,
+): StoredToken {
+  const trimmed = accessToken.trim();
+  if (trimmed.length === 0) {
+    throw new AniListError('Access token vazio. Ver RF-04.');
+  }
+
+  return { accessToken: trimmed, tokenType: 'Bearer', expiresAt: now + ttlMs };
+}
+
 export function isTokenExpired(token: StoredToken, now: number): boolean {
   return now >= token.expiresAt;
 }

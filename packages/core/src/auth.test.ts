@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ANILIST_TOKEN_TTL_MS,
   buildAuthorizeUrl,
   DEFAULT_TOKEN_TTL_MS,
   isTokenExpired,
   parseTokenFragment,
+  tokenFromAccessToken,
 } from './auth.js';
 import { AniListError } from './errors.js';
 
@@ -123,5 +125,36 @@ describe('isTokenExpired', () => {
 
     expect(parsed).not.toBeNull();
     expect(isTokenExpired(parsed!, now)).toBe(false);
+  });
+});
+
+describe('tokenFromAccessToken (RF-04)', () => {
+  const AGORA = 1_700_000_000_000;
+
+  it('RF-04: monta um StoredToken a partir do texto colado', () => {
+    expect(tokenFromAccessToken('abc123', AGORA)).toEqual({
+      accessToken: 'abc123',
+      tokenType: 'Bearer',
+      expiresAt: AGORA + ANILIST_TOKEN_TTL_MS,
+    });
+  });
+
+  it('RF-04: apara espaços em volta do token colado', () => {
+    expect(tokenFromAccessToken('  abc123\n', AGORA).accessToken).toBe('abc123');
+  });
+
+  it('RF-04: token em branco é recusado', () => {
+    expect(() => tokenFromAccessToken('   ', AGORA)).toThrow(AniListError);
+  });
+
+  it('RF-04: aceita um ttl explícito', () => {
+    expect(tokenFromAccessToken('abc', AGORA, 5_000).expiresAt).toBe(AGORA + 5_000);
+  });
+
+  it('RF-04: o token gerado só expira depois do prazo', () => {
+    const token = tokenFromAccessToken('abc', AGORA);
+
+    expect(isTokenExpired(token, AGORA + ANILIST_TOKEN_TTL_MS - 1)).toBe(false);
+    expect(isTokenExpired(token, AGORA + ANILIST_TOKEN_TTL_MS)).toBe(true);
   });
 });
