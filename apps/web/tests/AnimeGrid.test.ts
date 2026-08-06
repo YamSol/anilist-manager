@@ -45,13 +45,28 @@ describe('AnimeGrid', () => {
 
   it('RF-17: a coluna de prioridade ordena pelo comparador do core', async () => {
     const { comparePriority } = await import('@anilist-updater/core');
-    const priorityColumn = buildColumnDefs(null).find((col) => col.field === 'priority');
-    const comparator = priorityColumn?.comparator;
+    const comparator = buildColumnDefs(null).find((col) => col.field === 'priority')?.comparator;
 
     expect(comparator).toBeTypeOf('function');
-    // O 0 vai para o fim, e é o core que diz isso.
-    expect(comparator?.(0, 5, null as never, null as never, false)).toBe(comparePriority(0, 5));
+    // Crescente: a ordem é a que o core define, sem interferência.
     expect(comparator?.(1, 3, null as never, null as never, false)).toBe(comparePriority(1, 3));
+    expect(comparator?.(3, 1, null as never, null as never, false)).toBe(comparePriority(3, 1));
+  });
+
+  it('RF-17: o 0 vai para o fim NAS DUAS direções de ordenação', () => {
+    const comparator = buildColumnDefs(null).find((col) => col.field === 'priority')?.comparator;
+
+    // Crescente: 0 depois de qualquer prioridade real.
+    expect(comparator?.(0, 5, null as never, null as never, false)).toBeGreaterThan(0);
+    expect(comparator?.(5, 0, null as never, null as never, false)).toBeLessThan(0);
+
+    // Decrescente: o ag-grid nega o resultado, então o comparador precisa
+    // devolver o sinal invertido para o 0 continuar por último.
+    expect(comparator?.(0, 5, null as never, null as never, true)).toBeLessThan(0);
+    expect(comparator?.(5, 0, null as never, null as never, true)).toBeGreaterThan(0);
+
+    // Entre prioridades reais, o decrescente inverte normalmente.
+    expect(comparator?.(1, 3, null as never, null as never, true)).toBeLessThan(0);
   });
 
   it('RF-10: renderiza uma linha por anime, com as listas agregadas', async () => {

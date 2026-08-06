@@ -26,7 +26,12 @@ import {
   type Theme,
   type ValueGetterParams,
 } from 'ag-grid-community';
-import { comparePriority, type AnimeEntry, type Priority } from '@anilist-updater/core';
+import {
+  comparePriority,
+  PRIORITY_UNSET,
+  type AnimeEntry,
+  type Priority,
+} from '@anilist-updater/core';
 import { formatLabel, seasonLabel, statusLabel } from './labels.js';
 
 let registered = false;
@@ -131,8 +136,25 @@ export function buildColumnDefs(priorityCellRenderer: unknown): ColDef<AnimeEntr
       filter: 'agNumberColumnFilter',
       sortable: true,
       cellRenderer: priorityCellRenderer,
-      // Ver RF-17: 0 vai para o fim nas duas direções. A regra é do core.
-      comparator: (a: Priority, b: Priority) => comparePriority(a, b),
+      /**
+       * Ver RF-17: "sem prioridade" (0) vai para o fim NAS DUAS DIREÇÕES.
+       *
+       * `comparePriority` sozinho não basta aqui, e o motivo é do ag-grid: ele
+       * nega o resultado do comparador para ordenar decrescente. Devolvendo o
+       * valor cru, o 0 — que o core coloca por último — apareceria primeiro no
+       * decrescente. Então desfazemos a negação **só** nos pares que envolvem o
+       * 0; os demais continuam invertendo normalmente, que é o esperado.
+       *
+       * A regra de ordem continua sendo do core: aqui só se compensa a
+       * convenção de sinal do grid.
+       */
+      comparator: (a: Priority, b: Priority, _nodeA, _nodeB, isDescending: boolean) => {
+        const result = comparePriority(a, b);
+        if (a === PRIORITY_UNSET || b === PRIORITY_UNSET) {
+          return isDescending ? -result : result;
+        }
+        return result;
+      },
     },
     {
       field: 'format',
