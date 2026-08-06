@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 /**
@@ -24,6 +25,13 @@ export default defineConfig({
 
   plugins: [
     svelte(),
+    // Só age quando `process.env.VITEST` está setado — build e dev ficam idênticos.
+    // Sem ele, o Vitest resolve `svelte` pela condição `default` (index-server.js)
+    // e todo teste de componente morre em `mount(...) is not available on the server`;
+    // ele também põe `@testing-library/svelte-core` em `ssr.noExternal`, sem o que o
+    // Node tenta carregar o `wrapper-scaffold.svelte` do pacote e falha com
+    // `Unknown file extension ".svelte"`. É o plugin oficial da própria lib.
+    svelteTesting(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],

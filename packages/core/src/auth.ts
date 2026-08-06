@@ -5,7 +5,8 @@
  * foi descartado justamente porque devolve um `code` cuja troca exigiria o secret.
  */
 
-import { notImplemented } from './internal/stub.js';
+import { AniListError } from './errors.js';
+import { ANILIST_AUTHORIZE_ENDPOINT } from './queries.js';
 
 export interface AuthConfig {
   readonly clientId: string;
@@ -19,9 +20,35 @@ export interface StoredToken {
   readonly expiresAt: number;
 }
 
+/**
+ * Validade assumida quando o AniList não manda `expires_in`.
+ *
+ * Na prática ele sempre manda (um ano). Uma hora é a escolha conservadora para o
+ * caso degenerado: pedir login de novo cedo demais é um incômodo, tratar uma
+ * credencial de validade desconhecida como eterna é um bug de segurança.
+ */
+export const DEFAULT_TOKEN_TTL_MS = 60 * 60 * 1000;
+
 /** Ver RF-02. Produz uma URL com `response_type=token`, sem secret. */
-export function buildAuthorizeUrl(_config: AuthConfig): string {
-  return notImplemented('buildAuthorizeUrl');
+export function buildAuthorizeUrl(config: AuthConfig): string {
+  const clientId = config.clientId.trim();
+  const redirectUri = config.redirectUri.trim();
+
+  if (clientId.length === 0) {
+    throw new AniListError('Client ID não informado. Ver RF-01.');
+  }
+  if (redirectUri.length === 0) {
+    throw new AniListError('Redirect URI não informada. Ver RF-02.');
+  }
+
+  const url = new URL(ANILIST_AUTHORIZE_ENDPOINT);
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  // O implicit grant é o que torna o app secretless (AD-05): o token volta no
+  // fragmento, sem nenhuma troca server-to-server.
+  url.searchParams.set('response_type', 'token');
+
+  return url.toString();
 }
 
 /**
@@ -30,12 +57,59 @@ export function buildAuthorizeUrl(_config: AuthConfig): string {
  *
  * `now` é injetado (RNF-03) para que a expiração seja testável.
  */
-export function parseTokenFragment(_fragment: string, _now: number): StoredToken | null {
-  return notImplemented('parseTokenFragment');
+export function parseTokenFragment(fragment: string, now: number): StoredToken | null {
+  // Aceita com ou sem o `#` — quem chama pode passar `location.hash` cru.
+  const raw = fragment.startsWith('#') ? fragment.slice(1) : fragment;
+  if (raw.trim().length === 0) return null;
+
+  const params = new URLSearchParams(raw);
+  const accessToken = params.get('access_token')?.trim() ?? '';
+  if (accessToken.length === 0) return null;
+
+  const tokenType = params.get('token_type')?.trim();
+  const expiresIn = Number(params.get('expires_in'));
+  const ttlMs =
+    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : DEFAULT_TOKEN_TTL_MS;
+
+  return {
+    accessToken,
+    tokenType: tokenType !== undefined && tokenType.length > 0 ? tokenType : 'Bearer',
+    expiresAt: now + ttlMs,
+  };
 }
 
-export function isTokenExpired(_token: StoredToken, _now: number): boolean {
-  return notImplemented('isTokenExpired');
+/**
+ * Validade documentada dos tokens do AniList: um ano.
+ *
+ * Diferente de `DEFAULT_TOKEN_TTL_MS`: lá o valor é desconhecido e a hora curta é
+ * uma proteção; aqui o valor é sabido, só não veio junto com o token.
+ */
+export const ANILIST_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Ver RF-04. Constrói um `StoredToken` a partir de um access token colado à mão.
+ *
+ * Existe para que a política de expiração de um token colado seja **uma só**,
+ * decidida aqui, e não reinventada por cada cliente (web, CLI, APK). A autoridade
+ * final continua sendo o 401 da API — este prazo é só o palpite local.
+ *
+ * Lança `AniListError` se o token estiver em branco.
+ */
+export function tokenFromAccessToken(
+  accessToken: string,
+  now: number,
+  ttlMs: number = ANILIST_TOKEN_TTL_MS,
+): StoredToken {
+  const trimmed = accessToken.trim();
+  if (trimmed.length === 0) {
+    throw new AniListError('Access token vazio. Ver RF-04.');
+  }
+
+  return { accessToken: trimmed, tokenType: 'Bearer', expiresAt: now + ttlMs };
+}
+
+export function isTokenExpired(token: StoredToken, now: number): boolean {
+  return now >= token.expiresAt;
 }
 
 /**

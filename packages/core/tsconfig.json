@@ -1,15 +1,20 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
+    "noEmit": true,
     "rootDir": "./src",
     // "DOM" entra só pelos TIPOS padrão de fetch (Response, RequestInit, AbortSignal),
     // que também existem no Node 20+. O core continua proibido de TOCAR em DOM —
-    // isso é garantido por 'no-restricted-globals' no eslint.config.js e pelo projeto
-    // vitest "core", que roda em ambiente Node puro, sem jsdom. Ver RNF-03.
+    // isso é garantido por 'no-restricted-globals' e 'no-restricted-imports' no
+    // eslint.config.js e pelo projeto vitest "core", que roda em ambiente Node puro,
+    // sem jsdom. Ver RNF-03.
     "lib": ["ES2022", "DOM"],
-    "types": []
+    "types": ["node"]
   },
+  // Inclui os testes de propósito: este é o tsconfig que o typecheck e o
+  // projectService do typescript-eslint enxergam, e sem os testes aqui o lint
+  // type-aware (no-floating-promises e afins) não alcançaria 226 arquivos de teste.
+  // A emissão para dist/ é feita por tsconfig.build.json, que os exclui.
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "dist"]
+  "exclude": ["dist"]
 }

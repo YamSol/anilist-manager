@@ -19,6 +19,9 @@ const DOM_GLOBALS = [
 export default ts.config(
   {
     ignores: [
+      // Worktrees das frentes paralelas: são checkouts completos do próprio repo.
+      // Sem esta linha o eslint lintaria cada branch em andamento junto com a atual.
+      '.claude/**',
       '**/node_modules/**',
       '**/dist/**',
       '**/coverage/**',
@@ -116,9 +119,13 @@ export default ts.config(
     },
   },
 
-  // Configs de ferramenta que não pertencem a nenhum tsconfig do projeto.
-  // Lint sem type-checking: incluí-las num tsconfig só para agradar o linter
-  // poluiria o build dos pacotes.
+  // Configs de ferramenta e scripts que não pertencem a nenhum tsconfig do
+  // projeto. Lint sem type-checking: incluí-los num tsconfig só para agradar o
+  // linter poluiria o build dos pacotes.
+  //
+  // Os testes do core NÃO entram aqui — packages/core/tsconfig.json os inclui de
+  // propósito, justamente para que recebam lint type-aware (no-floating-promises
+  // e afins). A emissão para dist/ fica em tsconfig.build.json, que os exclui.
   {
     files: [
       'eslint.config.js',
@@ -126,6 +133,7 @@ export default ts.config(
       'playwright.config.ts',
       'packages/*/vitest.config.ts',
       'apps/*/svelte.config.js',
+      'deploy/**/*.{js,mjs,cjs}',
     ],
     extends: [ts.configs.disableTypeChecked],
     languageOptions: {

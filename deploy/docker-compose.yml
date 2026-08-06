@@ -1,0 +1,39 @@
+# Sobe o AniList Manager em http://localhost:3000 — mesma porta da v1 em Flask.
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# Sem env_file, sem secret e sem volume de out.json: não existe mais client
+# secret (AD-05/AD-06) e o snapshot passou a ser importado por seletor de
+# arquivo no navegador (AD-07). A imagem é genérica — o Client ID é informado
+# em runtime, na própria interface.
+
+# Sem isto o projeto herdaria o nome do diretório do arquivo ("deploy").
+name: anilist-manager
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: anilist-manager:2
+    container_name: anilist-manager
+    ports:
+      - '3000:8080'
+    restart: unless-stopped
+
+    # Servidor de arquivos estáticos: nada precisa escrever em disco além dos
+    # temporários do nginx, que a config aponta para /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--spider', 'http://127.0.0.1:8080/healthz']
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
