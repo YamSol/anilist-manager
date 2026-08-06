@@ -2,7 +2,26 @@ import { describe, expect, it } from 'vitest';
 
 import { SnapshotParseError } from './errors.js';
 import type { AnimeEntry, Priority } from './model.js';
-import { diffSnapshot, parseSnapshot, toSnapshot } from './snapshot.js';
+import { diffSnapshot, parseSnapshot, toSnapshot, type Snapshot } from './snapshot.js';
+
+/**
+ * Afirma que `parseSnapshot` rejeita a entrada com um `SnapshotParseError`
+ * apontando exatamente `at`.
+ *
+ * Substitui `toThrow(expect.objectContaining({ at }))`: aquela forma devolve
+ * `any`, escapando do lint com tipos, e — pior — não verificava o *tipo* do erro,
+ * só o campo. Qualquer objeto com um `at` igual passaria.
+ */
+function esperaFalhaDeParse(entrada: unknown, at: string): void {
+  try {
+    parseSnapshot(entrada);
+  } catch (erro) {
+    expect(erro).toBeInstanceOf(SnapshotParseError);
+    expect((erro as SnapshotParseError).at).toBe(at);
+    return;
+  }
+  expect.unreachable(`esperava SnapshotParseError em ${at}, mas o parse passou`);
+}
 
 function makeEntry(id: number, priority: Priority, title = `Anime ${String(id)}`): AnimeEntry {
   return {
@@ -65,15 +84,11 @@ describe('parseSnapshot', () => {
     ['null', null],
     ['texto de um objeto JSON', '{"id":1}'],
   ])('RF-31: raiz que não é array (%s) aponta $', (_nome, entrada) => {
-    expect(() => parseSnapshot(entrada)).toThrow(
-      expect.objectContaining({ name: 'SnapshotParseError', at: '$' }),
-    );
+    esperaFalhaDeParse(entrada, '$');
   });
 
   it('RF-31: item que não é objeto aponta o índice', () => {
-    expect(() => parseSnapshot([{ id: 1, name: 'A', priority: 1 }, 'lixo'])).toThrow(
-      expect.objectContaining({ at: '$[1]' }),
-    );
+    esperaFalhaDeParse([{ id: 1, name: 'A', priority: 1 }, 'lixo'], '$[1]');
   });
 
   it.each([
@@ -82,7 +97,7 @@ describe('parseSnapshot', () => {
     ['fracionário', { id: 1.5, name: 'A', priority: 1 }],
     ['null', { id: null, name: 'A', priority: 1 }],
   ])('RF-31: id %s aponta $[0].id', (_nome, item) => {
-    expect(() => parseSnapshot([item])).toThrow(expect.objectContaining({ at: '$[0].id' }));
+    esperaFalhaDeParse([item], '$[0].id');
   });
 
   it.each([
@@ -90,7 +105,7 @@ describe('parseSnapshot', () => {
     ['número', { id: 1, name: 42, priority: 1 }],
     ['null', { id: 1, name: null, priority: 1 }],
   ])('RF-31: name %s aponta $[0].name', (_nome, item) => {
-    expect(() => parseSnapshot([item])).toThrow(expect.objectContaining({ at: '$[0].name' }));
+    esperaFalhaDeParse([item], '$[0].name');
   });
 
   it.each([
@@ -100,7 +115,7 @@ describe('parseSnapshot', () => {
     ['fracionária', { id: 1, name: 'A', priority: 2.5 }],
     ['texto', { id: 1, name: 'A', priority: '3' }],
   ])('RF-31: priority %s aponta $[0].priority', (_nome, item) => {
-    expect(() => parseSnapshot([item])).toThrow(expect.objectContaining({ at: '$[0].priority' }));
+    esperaFalhaDeParse([item], '$[0].priority');
   });
 
   it('RF-31: o índice apontado é o do primeiro item ruim, não o do último', () => {
@@ -111,7 +126,7 @@ describe('parseSnapshot', () => {
       { id: 4, name: 'D', priority: 99 },
     ];
 
-    expect(() => parseSnapshot(dados)).toThrow(expect.objectContaining({ at: '$[2].priority' }));
+    esperaFalhaDeParse(dados, '$[2].priority');
   });
 });
 
@@ -182,7 +197,7 @@ describe('diffSnapshot', () => {
   });
 
   it('RF-34: sem legacyScale, um snapshot antigo diverge da conta convertida', () => {
-    const antigo = [{ id: 1, name: 'A', priority: 5 }];
+    const antigo: Snapshot = [{ id: 1, name: 'A', priority: 5 }];
     const convertida = [makeEntry(1, 1)];
 
     const diff = diffSnapshot(antigo, convertida);
@@ -192,7 +207,7 @@ describe('diffSnapshot', () => {
   });
 
   it('RF-34: com legacyScale, o mesmo par resulta em zero divergências', () => {
-    const antigo = [
+    const antigo: Snapshot = [
       { id: 1, name: 'A', priority: 5 },
       { id: 2, name: 'B', priority: 3 },
       { id: 3, name: 'C', priority: 1 },

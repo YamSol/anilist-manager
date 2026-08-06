@@ -189,7 +189,9 @@ describe('applyPlan — falhas individuais (RF-25)', () => {
 
   it('RF-25: rejeição que nem Error é vira AniListError com o valor no texto', async () => {
     const clienteQuebrado = {
-      // Rejeitar com valor cru é justamente o que se quer provar aqui.
+      // Rejeitar com valor cru é justamente o que se quer provar aqui: applyPlan
+      // precisa embrulhar qualquer coisa num AniListError, não só Error.
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
       setPriority: () => Promise.reject('string crua'),
     } as unknown as AniListClient;
 

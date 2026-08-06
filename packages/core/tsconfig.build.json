@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist",
+    // O artefato publicado não pode arrastar @types/node: o core roda em browser,
+    // em Node e (backlog) dentro do Capacitor. Ver RNF-03.
+    "types": []
+  },
+  "exclude": ["dist", "src/**/*.test.ts"]
+}

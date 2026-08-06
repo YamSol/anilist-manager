@@ -93,7 +93,7 @@ formatos de distribuição.
 
 | ID        | Requisito                                                                                                       | Critério de aceitação                                                                                                                  | Teste              |
 | --------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| **RF-30** | **Importar** um snapshot `[{id, name, priority}]` por seletor de arquivo. O `out.json` legado é entrada válida. | Importar o `out.json` de 36 entradas produz 36 itens válidos.                                                                          | `snapshot.test.ts` |
+| **RF-30** | **Importar** um snapshot `[{id, name, priority}]` por seletor de arquivo. O `out.json` legado é entrada válida. | Importar o `out.json` de 37 entradas produz 37 itens válidos.                                                                          | `snapshot.test.ts` |
 | **RF-31** | Um snapshot malformado produz **erro legível**, nunca um crash.                                                 | JSON inválido, raiz que não é array, item sem `id`, ou `priority` fora de `0..5` geram `SnapshotParseError` com a posição do problema. | `snapshot.test.ts` |
 | **RF-32** | **Exportar** o estado vivo no mesmo formato.                                                                    | O JSON exportado é reimportável sem perda.                                                                                             | `snapshot.test.ts` |
 | **RF-33** | **Diff** entre snapshot e lista viva, marcando cada linha como igual, divergente ou ausente da conta.           | O resumo traz as contagens de `matched`, `mismatched` e `missing`.                                                                     | `snapshot.test.ts` |
@@ -149,10 +149,24 @@ export interface AnimeEntry {
   readonly coverImage: string | null;
 }
 
-/** Dedupe por mediaId, agregando nomes de lista. RF-10, RF-11. */
+/** Domínios fechados, na ordem canônica de exibição. Populam os selects da UI. */
+export const ALL_MEDIA_FORMATS: readonly MediaFormat[];
+export const ALL_LIST_STATUSES: readonly ListStatus[];
+export const ALL_MEDIA_SEASONS: readonly MediaSeason[];
+
+/**
+ * Dedupe por mediaId, agregando nomes de lista. RF-10, RF-11.
+ *
+ * Aceita as três formas do payload: resposta completa (`{data:{MediaListCollection}}`),
+ * o `data` desembrulhado (`{MediaListCollection}`) e a coleção crua (`{lists}`).
+ * **Nunca lança** — entrada inválida devolve `[]`.
+ */
 export function normalizeCollection(raw: unknown): AnimeEntry[];
 
-/** RF-12. Lança se os três títulos forem nulos. */
+/**
+ * RF-12. Lança se os três títulos forem nulos — mas `normalizeCollection` não
+ * perde a linha por isso: ela cai para o rótulo `#<mediaId>`.
+ */
 export function pickTitle(t: {
   english?: string | null;
   romaji?: string | null;
@@ -171,13 +185,23 @@ export const PRIORITY_LOWEST = 5;
 export const PRIORITY_COLORS: Readonly<Record<Priority, string>>;
 export const PRIORITY_LABELS: Readonly<Record<Priority, string>>;
 
+export const ALL_PRIORITIES: readonly Priority[];
+
 export function isPriority(value: unknown): value is Priority;
 
 /** RF-20. nova = 6 - antiga para 1..5; 0 → 0. */
 export function invertPriority(p: Priority): Priority;
 
-/** RF-17. Ascendente por urgência; 0 sempre por último, em qualquer direção. */
+/** RF-17. Ascendente por urgência: 1 primeiro, 0 por último. */
 export function comparePriority(a: Priority, b: Priority): number;
+
+/**
+ * RF-17. Descendente: 5 primeiro, **0 continua por último**.
+ *
+ * Existe porque `-comparePriority(a, b)` NÃO resolve — negar leva o 0 para o topo
+ * e viola RF-17. Toda ordenação decrescente de prioridade deve usar esta função.
+ */
+export function comparePriorityDesc(a: Priority, b: Priority): number;
 
 export interface ConversionChange {
   readonly id: number;
@@ -222,7 +246,14 @@ export interface AuthConfig {
   readonly redirectUri: string;
 }
 
-/** RF-02. response_type=token, sem secret. */
+/** Usado quando o fragmento vem sem `expires_in`. 1 hora. */
+export const DEFAULT_TOKEN_TTL_MS: number;
+
+/**
+ * RF-02. response_type=token, sem secret.
+ * Lança `AniListError` se `clientId` ou `redirectUri` estiverem em branco — não
+ * chame a cada tecla digitada sem `try`.
+ */
 export function buildAuthorizeUrl(config: AuthConfig): string;
 
 export interface StoredToken {
@@ -383,6 +414,19 @@ export function diffSnapshot(
   options?: DiffOptions,
 ): SnapshotDiff; // RF-33
 ```
+
+### 5.9 Comportamentos garantidos
+
+Contratos que não aparecem nas assinaturas mas que a UI pode assumir:
+
+| Área                       | Garantia                                                                                                                                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AniListClient.request`    | Devolve `payload.data`, já desembrulhado.                                                                                                                                                                         |
+| `AniListClient`            | **401 e 403 viram `AuthError` sem retry.** `maxRetries` conta _retentativas_ — 3 significa 4 idas à rede no pior caso.                                                                                            |
+| `normalizeCollection`      | Nunca lança. Entrada irreconhecível vira `[]`. Anime sem título nos três idiomas recebe o rótulo `#<mediaId>`.                                                                                                    |
+| `parseSnapshot`            | Aceita tanto o objeto já parseado quanto **a string crua do arquivo**. JSON inválido lança `SnapshotParseError` com `at: '$'`. Caminhos seguem o formato `$[3].priority`.                                         |
+| `diffSnapshot`             | Só o snapshot gera linhas em `rows`, e `name` vem do snapshot, não do título vivo. Anime que existe só na conta aparece em `unset` (RF-35), nunca em `rows`.                                                      |
+| `applyPlan` / `onProgress` | Emitido **antes** de cada escrita (com `current` preenchido) e uma última vez ao terminar (`current: null`, `done === total`). A falha de uma escrita só aparece no evento seguinte. `failed` é sempre uma cópia. |
 
 ---
 

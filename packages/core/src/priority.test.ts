@@ -96,22 +96,31 @@ describe('invertPriority', () => {
 
 describe('comparePriority', () => {
   it('RF-17: ordena 1 antes de 2 antes de 5', () => {
-    expect([5, 1, 3, 2, 4].sort(comparePriority)).toEqual([1, 2, 3, 4, 5]);
+    const valores: Priority[] = [5, 1, 3, 2, 4];
+
+    expect(valores.sort(comparePriority)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('RF-17: ascendente joga 0 para o fim', () => {
-    expect([0, 3, 1, 0, 5].sort(comparePriority)).toEqual([1, 3, 5, 0, 0]);
+    const valores: Priority[] = [0, 3, 1, 0, 5];
+
+    expect(valores.sort(comparePriority)).toEqual([1, 3, 5, 0, 0]);
   });
 
   it('RF-17: descendente inverte 1..5 mas mantém 0 no fim', () => {
-    expect([0, 3, 1, 5].sort(comparePriorityDesc)).toEqual([5, 3, 1, 0]);
+    const valores: Priority[] = [0, 3, 1, 5];
+
+    expect(valores.sort(comparePriorityDesc)).toEqual([5, 3, 1, 0]);
   });
 
   it('RF-17: negar comparePriority NÃO serve para descender — é por isso que existe comparePriorityDesc', () => {
-    const negado = [0, 3, 1, 5].sort((a, b) => -comparePriority(a, b));
+    const negado: Priority[] = [0, 3, 1, 5];
+    const correto: Priority[] = [0, 3, 1, 5];
+
+    negado.sort((a, b) => -comparePriority(a, b));
 
     expect(negado[0]).toBe(0); // o 0 sobe para o topo, violando RF-17
-    expect([0, 3, 1, 5].sort(comparePriorityDesc)[0]).toBe(5);
+    expect(correto.sort(comparePriorityDesc)[0]).toBe(5);
   });
 
   it('RF-17: prioridades iguais empatam nas duas direções', () => {
