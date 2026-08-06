@@ -23,8 +23,3 @@ test-results/
 # Dados do usuário (snapshots pessoais)
 out.json
 *.snapshot.json
-
-# Legado Python (removido na fase 3)
-venv/
-__pycache__/
-*.pyc
