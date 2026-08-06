@@ -13,6 +13,9 @@ test-results/
 # Ferramentas
 .husky/_/
 
+# Worktrees das frentes paralelas (git os gerencia; não versionar)
+.claude/worktrees/
+
 # Ambiente
 .env
 .env.local
