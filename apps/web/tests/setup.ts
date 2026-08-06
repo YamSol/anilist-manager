@@ -18,6 +18,14 @@ globalThis.ResizeObserver = class ResizeObserverStub {
   readonly disconnect = ignore;
 };
 
+/**
+ * O jsdom também não implementa Object URLs, de que `lib/download.ts` depende
+ * para exportar backup (RF-23) e snapshot (RF-32). Os testes espionam estes
+ * stubs; sem eles, `vi.spyOn` falha com "createObjectURL does not exist".
+ */
+URL.createObjectURL = () => 'blob:stub';
+URL.revokeObjectURL = ignore;
+
 afterEach(() => {
   cleanup();
   localStorage.clear();

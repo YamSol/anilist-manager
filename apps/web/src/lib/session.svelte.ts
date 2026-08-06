@@ -54,6 +54,14 @@ export function createSession(deps: SessionDeps = {}) {
       error = null;
     },
 
+    /**
+     * Cliente autenticado para quem precisa falar com a API fora do fluxo da
+     * lista — hoje só `applyPlan` (RF-24), que recebe o cliente por parâmetro.
+     */
+    client(token: string): AniListClient {
+      return createClient(token);
+    },
+
     reset(): void {
       entries = [];
       loadedAt = null;
