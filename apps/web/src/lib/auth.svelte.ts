@@ -1,9 +1,9 @@
 /**
  * Estado de autenticação da camada web. Escopo A do REQUIREMENTS (RF-01..RF-06).
  *
- * Toda a lógica de OAuth vive no core (`buildAuthorizeUrl`, `parseTokenFragment`,
- * `isTokenExpired`). Aqui só existe o que é inerentemente do browser: storage,
- * `location` e o redirect.
+ * Toda a lógica de OAuth vive no core (`buildAuthorizeUrl`, `parseAuthCallback`,
+ * `exchangeCodeForToken`, `isTokenExpired`). Aqui só existe o que é inerentemente
+ * do browser: storage, `location` e o redirect.
  */
 
 import {
