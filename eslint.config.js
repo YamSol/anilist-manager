@@ -116,6 +116,22 @@ export default ts.config(
     },
   },
 
+  // Os testes do core moram em packages/core/src/*.test.ts (co-localizados com o
+  // código), mas packages/core/tsconfig.json os EXCLUI de propósito: aquele
+  // tsconfig é o de build e emitiria os testes em dist/. Sem projeto que os
+  // contenha, o projectService recusa o arquivo com "was not found by the project
+  // service" — e o pre-commit (lint-staged) barraria todo commit de teste.
+  // Lint sem type-checking aqui é o mesmo trato já feito para os arquivos de
+  // configuração logo abaixo. Ver RNF-08.
+  {
+    files: ['packages/core/src/**/*.test.ts'],
+    extends: [ts.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: false, project: false },
+      globals: { ...globals.node },
+    },
+  },
+
   // Configs de ferramenta que não pertencem a nenhum tsconfig do projeto.
   // Lint sem type-checking: incluí-las num tsconfig só para agradar o linter
   // poluiria o build dos pacotes.
