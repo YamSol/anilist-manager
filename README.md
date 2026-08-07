@@ -276,4 +276,4 @@ Fora desta versão, mas viabilizados pela arquitetura:
 
 ## Licença
 
-MIT.
+[GPL-3](https://www.gnu.org/licenses/gpl-3.0.txt)
