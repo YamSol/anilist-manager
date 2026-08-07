@@ -26,6 +26,7 @@ import {
 } from './tokenStore.js';
 import { DEFAULT_ROUTE, routeHref } from './router.js';
 import { errorMessage } from './labels.js';
+import { resolveTokenEndpoint } from './endpoints.js';
 
 /** O Redirect URI registrado no AniList precisa ser exatamente a origem do app. */
 export function currentRedirectUri(): string {
@@ -85,6 +86,7 @@ export async function consumeAuthCallback(
       clientId: loadClientId(),
       clientSecret,
       redirectUri: currentRedirectUri(),
+      tokenEndpoint: resolveTokenEndpoint(),
     });
     store.save(token);
     cleanCallbackUrl();
