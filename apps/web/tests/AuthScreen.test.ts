@@ -97,4 +97,69 @@ describe('AuthScreen', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Sua sessão expirou. Entre novamente.');
   });
+
+  it('RF-07: nada de CORS nem de proxy na tela — não é assunto de quem entra', () => {
+    render(AuthScreen, { auth: createAuth({ redirect: vi.fn() }) });
+
+    // O texto antigo explicava a limitação técnica da hospedagem para alguém que
+    // não pode fazer nada a respeito e ainda nem sabe se ela se aplica.
+    expect(document.body.textContent).not.toMatch(/CORS|proxy/i);
+  });
+
+  it('RF-07: sem proxy, avisa do passo extra ANTES de mandar ao AniList', async () => {
+    const auth = createAuth({ redirect: vi.fn(), probe: () => Promise.resolve(false) });
+    render(AuthScreen, { auth });
+
+    await screen.findByText(/passo a mais/i);
+    // O caminho continua disponível: é o redirect que traz o code que o app
+    // precisa para montar o comando de troca.
+    expect(screen.getByRole('button', { name: 'Entrar com AniList' })).toBeInTheDocument();
+  });
+
+  it('RF-07: com proxy, nenhum aviso de passo extra polui a tela', async () => {
+    const auth = createAuth({ redirect: vi.fn(), probe: () => Promise.resolve(true) });
+    render(AuthScreen, { auth });
+
+    await vi.waitFor(() => {
+      expect(auth.proxyStatus).toBe('disponivel');
+    });
+    expect(screen.queryByText(/passo a mais/i)).not.toBeInTheDocument();
+  });
+
+  it('RF-08: de volta sem proxy, a tela entrega o comando pronto', async () => {
+    const auth = createAuth({ redirect: vi.fn() });
+    auth.setClientId('12345');
+    auth.setClientSecret('segredo-do-usuario');
+    auth.applyCallback({
+      token: null,
+      message: null,
+      needsManualToken: true,
+      code: 'code-capturado',
+    });
+
+    render(AuthScreen, { auth });
+
+    // O usuário não copia o code de lugar nenhum: ele já está no comando.
+    const comando = await screen.findByText(/grant_type/);
+    expect(comando.textContent).toContain('code-capturado');
+    expect(comando.textContent).toContain('/api/v2/oauth/token');
+    expect(screen.getByRole('button', { name: 'Copiar comando' })).toBeInTheDocument();
+  });
+
+  it('RF-08: colar a resposta do console conclui o login', async () => {
+    const user = userEvent.setup();
+    const auth = createAuth({ redirect: vi.fn() });
+    auth.setClientId('12345');
+    auth.setClientSecret('segredo');
+    auth.applyCallback({ token: null, message: null, needsManualToken: true, code: 'code-abc' });
+
+    render(AuthScreen, { auth });
+
+    await user.click(screen.getByLabelText('Resposta do AniList'));
+    await user.paste('{"access_token":"tok-do-console","token_type":"Bearer"}');
+    await user.click(screen.getByRole('button', { name: 'Concluir login' }));
+
+    expect(auth.authenticated).toBe(true);
+    expect(auth.token?.accessToken).toBe('tok-do-console');
+  });
 });

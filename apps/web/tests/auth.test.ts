@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Escopo A — autenticação (RF-01 a RF-06).
  *
  * As funções do core viram espiãs para que estes testes verifiquem a *fiação* da
@@ -170,6 +170,11 @@ describe('RF-03: retorno do OAuth na query', () => {
     expect(outcome?.token).toBeNull();
     expect(outcome?.needsManualToken).toBe(true);
     expect(createTokenStore().load()).toBeNull();
+    // RF-08: o code TEM de sobreviver — é com ele que o app monta o comando de
+    // troca, em vez de mandar o usuário copiá-lo da barra de endereços.
+    expect(outcome?.code).toBe('code-abc');
+    // Não é erro do usuário, então não vira alerta vermelho.
+    expect(outcome?.message).toBeNull();
   });
 
   it('RF-05: credencial recusada NÃO vira pedido de token colado', async () => {
@@ -182,6 +187,8 @@ describe('RF-03: retorno do OAuth na query', () => {
     // A distinção importa: aqui o caminho é corrigir o secret, não colar token.
     expect(outcome?.needsManualToken).toBe(false);
     expect(outcome?.message).toBeTruthy();
+    // O code já foi gasto na tentativa; guardá-lo só ofereceria um comando morto.
+    expect(outcome?.code).toBeNull();
   });
 
   it('RF-03: sem secret guardado, a troca nem é tentada', async () => {
@@ -201,7 +208,7 @@ describe('RF-04: colar access token manualmente', () => {
     const auth = createAuth({ store: createTokenStore(), redirect, now: () => 1_000 });
 
     expect(auth.authenticated).toBe(false);
-    expect(auth.pasteToken('  tok-colado  ')).toBe(true);
+    expect(auth.submitTokenResponse('  tok-colado  ')).toBe(true);
 
     expect(auth.authenticated).toBe(true);
     expect(auth.token?.accessToken).toBe('tok-colado');
@@ -213,9 +220,105 @@ describe('RF-04: colar access token manualmente', () => {
   it('RF-04: token vazio não autentica e explica o motivo', () => {
     const auth = createAuth({ store: createTokenStore() });
 
-    expect(auth.pasteToken('   ')).toBe(false);
+    expect(auth.submitTokenResponse('   ')).toBe(false);
     expect(auth.authenticated).toBe(false);
-    expect(auth.message).toBe('Cole um access token válido.');
+    expect(auth.message).toBe('Cole a resposta do AniList ou um access token.');
+  });
+
+  it('RF-08: colar a resposta inteira do console também autentica', () => {
+    const auth = createAuth({ store: createTokenStore(), now: () => 1_000 });
+
+    const colado = JSON.stringify({
+      token_type: 'Bearer',
+      expires_in: 31_536_000,
+      access_token: 'tok-do-console',
+      refresh_token: 'refresh-do-console',
+    });
+
+    expect(auth.submitTokenResponse(colado)).toBe(true);
+    expect(auth.token?.accessToken).toBe('tok-do-console');
+    // RF-09: o refresh_token não pode se perder no caminho até o storage.
+    expect(createTokenStore().load()?.refreshToken).toBe('refresh-do-console');
+  });
+
+  it('RF-08: a recusa do AniList colada mostra o motivo DELE, não um genérico', () => {
+    const auth = createAuth({ store: createTokenStore() });
+
+    expect(
+      auth.submitTokenResponse('{"error":"invalid_grant","message":"Authorization code expired"}'),
+    ).toBe(false);
+    // "Sessão inválida ou expirada" não diria o que fazer; isto diz.
+    expect(auth.message).toContain('Authorization code expired');
+  });
+});
+
+describe('RF-07: capacidade da hospedagem descoberta antes do redirect', () => {
+  it('RF-07: começa verificando e conclui pela sonda', async () => {
+    const auth = createAuth({ store: createTokenStore(), probe: () => Promise.resolve(true) });
+
+    expect(auth.proxyStatus).toBe('verificando');
+    await vi.waitFor(() => {
+      expect(auth.proxyStatus).toBe('disponivel');
+    });
+  });
+
+  it('RF-07: sem proxy, a tela sabe disso ANTES de qualquer redirect', async () => {
+    const auth = createAuth({ store: createTokenStore(), probe: () => Promise.resolve(false) });
+
+    await vi.waitFor(() => {
+      expect(auth.proxyStatus).toBe('ausente');
+    });
+  });
+
+  it('RF-07: quem já está autenticado não gasta uma sondagem', () => {
+    const store = createTokenStore();
+    store.save(TOKEN);
+    const probe = vi.fn(() => Promise.resolve(true));
+
+    createAuth({ store, probe });
+
+    expect(probe).not.toHaveBeenCalled();
+  });
+});
+
+describe('RF-08: troca conduzida quando não há proxy', () => {
+  it('RF-08: o code capturado vira um comando pronto, sem copiar da URL', () => {
+    const auth = createAuth({ store: createTokenStore() });
+    auth.setClientId('12345');
+    auth.setClientSecret('segredo-do-usuario');
+
+    auth.applyCallback({
+      token: null,
+      message: null,
+      needsManualToken: true,
+      code: 'code-capturado',
+    });
+
+    expect(auth.pendingCode).toBe('code-capturado');
+    expect(auth.proxyStatus).toBe('ausente');
+    expect(auth.exchangeSnippet).toContain('code-capturado');
+    expect(auth.exchangeSnippet).toContain('segredo-do-usuario');
+  });
+
+  it('RF-08: sem credenciais não há comando a oferecer', () => {
+    const auth = createAuth({ store: createTokenStore() });
+
+    auth.applyCallback({ token: null, message: null, needsManualToken: true, code: 'code-abc' });
+
+    // Um comando com o client_id em branco falharia no console, longe daqui.
+    expect(auth.exchangeSnippet).toBeNull();
+  });
+
+  it('RF-06: sair descarta o code pendente, que é de uso único', () => {
+    const auth = createAuth({ store: createTokenStore() });
+    auth.setClientId('12345');
+    auth.setClientSecret('segredo');
+    auth.applyCallback({ token: null, message: null, needsManualToken: true, code: 'code-abc' });
+
+    auth.logout();
+
+    expect(auth.pendingCode).toBeNull();
+    expect(auth.exchangeSnippet).toBeNull();
   });
 });
 
@@ -240,7 +343,7 @@ describe('RF-06: sair', () => {
 
     auth.setClientId('12345');
     auth.setClientSecret('segredo');
-    auth.pasteToken('tok-abc');
+    auth.submitTokenResponse('tok-abc');
     expect(auth.authenticated).toBe(true);
 
     auth.logout();

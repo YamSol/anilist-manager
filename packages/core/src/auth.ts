@@ -216,10 +216,12 @@ export interface ProbeTokenProxyOptions {
  * de vista de quem precisa escolher a tela, e as duas levam ao mesmo lugar.
  */
 export async function probeTokenProxy(options: ProbeTokenProxyOptions = {}): Promise<boolean> {
-  const fetcher = options.fetcher ?? resolveGlobalFetch();
   const endpoint = options.tokenEndpoint ?? TOKEN_PROXY_PATH;
 
   try {
+    // A resolução do fetch entra no try: num ambiente sem fetch global, "não dá
+    // para sondar" é a mesma resposta prática que "não há proxy".
+    const fetcher = options.fetcher ?? resolveGlobalFetch();
     const response = await fetcher(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
