@@ -11,17 +11,21 @@ import type * as Core from '@anilist-updater/core';
 import type { StoredToken } from '@anilist-updater/core';
 import { AuthError, TokenExchangeUnavailableError } from '@anilist-updater/core';
 
-const { buildAuthorizeUrl, exchangeCodeForToken, isTokenExpired } = vi.hoisted(() => ({
-  buildAuthorizeUrl: vi.fn<(config: { clientId: string; redirectUri: string }) => string>(),
-  exchangeCodeForToken: vi.fn<() => Promise<StoredToken>>(),
-  isTokenExpired: vi.fn<(token: StoredToken, now: number) => boolean>(),
-}));
+const { buildAuthorizeUrl, exchangeCodeForToken, isTokenExpired, refreshAccessToken } = vi.hoisted(
+  () => ({
+    buildAuthorizeUrl: vi.fn<(config: { clientId: string; redirectUri: string }) => string>(),
+    exchangeCodeForToken: vi.fn<() => Promise<StoredToken>>(),
+    isTokenExpired: vi.fn<(token: StoredToken, now: number) => boolean>(),
+    refreshAccessToken: vi.fn<() => Promise<StoredToken>>(),
+  }),
+);
 
 vi.mock('@anilist-updater/core', async (importOriginal) => ({
   ...(await importOriginal<typeof Core>()),
   buildAuthorizeUrl,
   exchangeCodeForToken,
   isTokenExpired,
+  refreshAccessToken,
 }));
 
 const { consumeAuthCallback, createAuth } = await import('../src/lib/auth.svelte.js');
@@ -333,6 +337,62 @@ describe('RF-05: token expirado volta ao login', () => {
     expect(auth.authenticated).toBe(false);
     expect(auth.message).toBe('Sua sessão expirou. Entre novamente.');
     expect(store.load()).toBeNull();
+  });
+
+  it('RF-09: com refresh token e secret, tenta renovar antes de exigir login', async () => {
+    const store = createTokenStore();
+    store.save({ ...TOKEN, refreshToken: 'refresh-guardado' });
+    saveClientSecret('segredo');
+    isTokenExpired.mockReturnValue(true);
+    refreshAccessToken.mockResolvedValue({ ...TOKEN, accessToken: 'tok-renovado' });
+
+    const auth = createAuth({ store });
+
+    await vi.waitFor(() => {
+      expect(auth.authenticated).toBe(true);
+    });
+    expect(auth.token?.accessToken).toBe('tok-renovado');
+    // A mensagem de expiração some junto: a sessão não expirou de fato.
+    expect(auth.message).toBeNull();
+    expect(store.load()?.accessToken).toBe('tok-renovado');
+  });
+
+  it('RF-09: renovação recusada não trava a tela — o login continua lá', async () => {
+    const store = createTokenStore();
+    store.save({ ...TOKEN, refreshToken: 'refresh-guardado' });
+    saveClientSecret('segredo');
+    isTokenExpired.mockReturnValue(true);
+    // O caso que não sabemos responder: se o AniList não habilita este grant.
+    refreshAccessToken.mockRejectedValue(new AuthError('unsupported_grant_type'));
+
+    const auth = createAuth({ store });
+
+    await vi.waitFor(() => {
+      expect(refreshAccessToken).toHaveBeenCalled();
+    });
+    expect(auth.authenticated).toBe(false);
+    expect(auth.message).toBe('Sua sessão expirou. Entre novamente.');
+  });
+
+  it('RF-09: sem refresh token guardado, nem tenta renovar', () => {
+    const store = createTokenStore();
+    store.save(TOKEN);
+    saveClientSecret('segredo');
+    isTokenExpired.mockReturnValue(true);
+
+    createAuth({ store });
+
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('RF-09: sem o secret do usuário, renovar é impossível e não se tenta', () => {
+    const store = createTokenStore();
+    store.save({ ...TOKEN, refreshToken: 'refresh-guardado' });
+    isTokenExpired.mockReturnValue(true);
+
+    createAuth({ store });
+
+    expect(refreshAccessToken).not.toHaveBeenCalled();
   });
 });
 

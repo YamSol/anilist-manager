@@ -319,6 +319,25 @@ export interface ExchangeCodeOptions {
  */
 export function exchangeCodeForToken(options: ExchangeCodeOptions): Promise<StoredToken>;
 
+export interface RefreshTokenOptions {
+  readonly refreshToken: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly tokenEndpoint?: string; // default: TOKEN_PROXY_PATH
+  readonly fetcher?: Fetcher;
+  readonly now?: () => number;
+}
+
+/**
+ * RF-09. Troca o refresh token por um access token novo, pelo mesmo proxy.
+ *
+ * ⚠️ NÃO VERIFICADO contra a API real: exige um refresh token válido, que só um
+ * login real produz. O grant existe no league/oauth2-server, mas o implicit já
+ * ensinou que "a biblioteca suporta" não implica "está habilitado" (AD-05).
+ * Quem chama trata a falha como caminho normal e cai no login.
+ */
+export function refreshAccessToken(options: RefreshTokenOptions): Promise<StoredToken>;
+
 export interface ProbeTokenProxyOptions {
   readonly tokenEndpoint?: string; // default: TOKEN_PROXY_PATH
   readonly fetcher?: Fetcher;

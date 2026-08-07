@@ -9,6 +9,7 @@ import {
   parseAuthCallback,
   parseTokenResponse,
   probeTokenProxy,
+  refreshAccessToken,
   TOKEN_PROXY_PATH,
   tokenFromAccessToken,
 } from './auth.js';
@@ -307,6 +308,116 @@ describe('exchangeCodeForToken (RF-03)', () => {
     await exchangeCodeForToken({ ...BASE, tokenEndpoint: '/api/troca', fetcher });
 
     expect(calledUrl).toBe('/api/troca');
+  });
+});
+
+describe('refreshAccessToken (RF-09)', () => {
+  const NOW = 1_700_000_000_000;
+  const BASE = {
+    refreshToken: 'def502-refresh',
+    clientId: '12345',
+    clientSecret: 'segredo-do-usuario',
+    now: () => NOW,
+  };
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  it('RF-09: envia grant_type=refresh_token com as credenciais do usuário', async () => {
+    let body: Record<string, unknown> = {};
+    const fetcher: Fetcher = (_url, init) => {
+      body = JSON.parse(init.body as string) as Record<string, unknown>;
+      return Promise.resolve(jsonResponse({ access_token: 'tok-novo' }));
+    };
+
+    await refreshAccessToken({ ...BASE, fetcher });
+
+    expect(body).toEqual({
+      grant_type: 'refresh_token',
+      client_id: '12345',
+      client_secret: 'segredo-do-usuario',
+      refresh_token: 'def502-refresh',
+    });
+    // Nada de redirect_uri nem de code: não é uma autorização, é uma renovação.
+    expect(body).not.toHaveProperty('code');
+  });
+
+  it('RF-09: o refresh token novo substitui o antigo quando vem um', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok-novo', refresh_token: 'refresh-novo' }));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).resolves.toMatchObject({
+      accessToken: 'tok-novo',
+      refreshToken: 'refresh-novo',
+    });
+  });
+
+  it('AD-10: renova pelo proxy de mesma origem, nunca no anilist.co', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(jsonResponse({ access_token: 'tok' }));
+    };
+
+    await refreshAccessToken({ ...BASE, fetcher });
+
+    expect(calledUrl).toBe(TOKEN_PROXY_PATH);
+  });
+
+  it('RF-09: refresh recusado vira AuthError com o motivo do AniList', async () => {
+    // O caso que mais interessa: se o AniList não habilitar este grant, é aqui
+    // que se descobre, e o chamador precisa poder distinguir isso de rede caída.
+    const fetcher: Fetcher = () =>
+      Promise.resolve(
+        jsonResponse({ error: 'unsupported_grant_type', message: 'Grant não suportado' }, 400),
+      );
+
+    const promise = refreshAccessToken({ ...BASE, fetcher });
+
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toThrow(/renovação: Grant não suportado/);
+  });
+
+  it('AD-10: sem proxy, renovar é tão impossível quanto trocar', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } }));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(
+      TokenExchangeUnavailableError,
+    );
+  });
+
+  it('RF-09: refresh token em branco falha antes de ir à rede', async () => {
+    let chamou = false;
+    const fetcher: Fetcher = () => {
+      chamou = true;
+      return Promise.resolve(jsonResponse({ access_token: 'tok' }));
+    };
+
+    await expect(
+      refreshAccessToken({ ...BASE, refreshToken: ' ', fetcher }),
+    ).rejects.toBeInstanceOf(AniListError);
+    expect(chamou).toBe(false);
+  });
+
+  it('RF-02: sem secret, nem tenta', async () => {
+    await expect(
+      refreshAccessToken({
+        ...BASE,
+        clientSecret: '  ',
+        fetcher: () => Promise.reject(new Error()),
+      }),
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('falha de transporte vira NetworkError', async () => {
+    const fetcher: Fetcher = () => Promise.reject(new Error('offline'));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(NetworkError);
   });
 });
 

@@ -256,26 +256,53 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new AuthError('Client Secret não informado. Ver RF-02.');
   }
 
+  return postarNoTokenEndpoint({
+    fetcher,
+    endpoint,
+    now,
+    recusa: 'O AniList recusou a troca do código',
+    body: {
+      grant_type: 'authorization_code',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      redirect_uri: options.redirectUri,
+      code: options.code.trim(),
+    },
+  });
+}
+
+interface PostTokenOptions {
+  readonly fetcher: Fetcher;
+  readonly endpoint: string;
+  readonly now: () => number;
+  /** Início da mensagem de `AuthError`, completado com o motivo do AniList. */
+  readonly recusa: string;
+  readonly body: Readonly<Record<string, string>>;
+}
+
+/**
+ * O POST no endpoint de token, com a mesma classificação de erro para todos os
+ * grants que passam por ali (AD-10).
+ *
+ * O que precisa ser idêntico entre a troca e a renovação não é o corpo — é o
+ * tratamento: distinguir "não há proxy aqui" de "o AniList recusou" e de "a rede
+ * caiu" é o que decide qual tela aparece, e duas cópias dessa decisão divergem.
+ */
+async function postarNoTokenEndpoint(options: PostTokenOptions): Promise<StoredToken> {
   let response: Response;
   try {
-    response = await fetcher(endpoint, {
+    response = await options.fetcher(options.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        client_id: options.clientId.trim(),
-        client_secret: options.clientSecret.trim(),
-        redirect_uri: options.redirectUri,
-        code: options.code.trim(),
-      }),
+      body: JSON.stringify(options.body),
     });
   } catch (cause) {
-    throw new NetworkError('Falha de rede ao trocar o authorization code.', { cause });
+    throw new NetworkError('Falha de rede ao falar com o endpoint de token.', { cause });
   }
 
   if (!respondeComoProxy(response)) {
     throw new TokenExchangeUnavailableError(
-      `Não há proxy de troca de token em ${endpoint}. Esta hospedagem não suporta login direto.`,
+      `Não há proxy de troca de token em ${options.endpoint}. Esta hospedagem não suporta login direto.`,
     );
   }
 
@@ -286,7 +313,7 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new NetworkError('Resposta ilegível do endpoint de token.', { cause });
   }
 
-  const token = response.ok ? tokenFromPayload(payload, now()) : null;
+  const token = response.ok ? tokenFromPayload(payload, options.now()) : null;
   if (token === null) {
     const detalhe =
       typeof payload.message === 'string'
@@ -294,10 +321,61 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
         : typeof payload.error === 'string'
           ? payload.error
           : `HTTP ${String(response.status)}`;
-    throw new AuthError(`O AniList recusou a troca do código: ${detalhe}`);
+    throw new AuthError(`${options.recusa}: ${detalhe}`);
   }
 
   return token;
+}
+
+export interface RefreshTokenOptions {
+  readonly refreshToken: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  /** Default: `TOKEN_PROXY_PATH`. Um caminho de mesma origem, nunca anilist.co. */
+  readonly tokenEndpoint?: string;
+  readonly fetcher?: Fetcher;
+  readonly now?: () => number;
+}
+
+/**
+ * Ver RF-09. Troca o refresh token por um access token novo.
+ *
+ * ⚠️ **Não verificado contra a API real.** O AniList devolve `refresh_token` na
+ * troca, e `grant_type=refresh_token` é o que o league/oauth2-server — que é o
+ * servidor por trás daquele endpoint — implementa. Mas se o grant está *ligado*
+ * lá é outra pergunta, e responder a ela exige um refresh token válido, que só
+ * um login real produz. O implicit grant já ensinou que "a biblioteca suporta"
+ * não implica "está habilitado" (AD-05).
+ *
+ * Por isso quem chama trata a falha como caminho normal e cai no login, em vez
+ * de tratá-la como defeito.
+ *
+ * Passa pelo mesmo proxy da troca, pelo mesmo motivo: o endpoint não manda CORS.
+ */
+export async function refreshAccessToken(options: RefreshTokenOptions): Promise<StoredToken> {
+  const fetcher = options.fetcher ?? resolveGlobalFetch();
+  const now = options.now ?? (() => Date.now());
+  const endpoint = options.tokenEndpoint ?? TOKEN_PROXY_PATH;
+
+  if (options.refreshToken.trim().length === 0) {
+    throw new AniListError('Refresh token ausente.');
+  }
+  if (options.clientSecret.trim().length === 0) {
+    throw new AuthError('Client Secret não informado. Ver RF-02.');
+  }
+
+  return postarNoTokenEndpoint({
+    fetcher,
+    endpoint,
+    now,
+    recusa: 'O AniList recusou a renovação',
+    body: {
+      grant_type: 'refresh_token',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      refresh_token: options.refreshToken.trim(),
+    },
+  });
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   parseAuthCallback,
   parseTokenResponse,
   probeTokenProxy,
+  refreshAccessToken,
   TokenExchangeUnavailableError,
   type StoredToken,
   type TokenStore,
@@ -161,6 +162,34 @@ export function createAuth(options: AuthOptions = {}) {
     } else {
       store.clear();
       message = 'Sua sessão expirou. Entre novamente.';
+
+      // RF-09: com refresh token e secret em mãos, vale tentar renovar antes de
+      // exigir o fluxo inteiro de novo — sobretudo nas hospedagens onde esse
+      // fluxo é o passo manual do console (AD-11).
+      //
+      // A mensagem de expiração já está posta, e a tela de login já aparece: se
+      // a renovação vier, ela substitui as duas; se não vier, o usuário nunca
+      // esperou por ela. É de propósito — não sabemos se o AniList habilita este
+      // grant, e a UI não pode ficar refém dessa dúvida.
+      const refresh = stored.refreshToken;
+      const secret = loadClientSecret();
+      if (refresh !== undefined && secret !== '') {
+        void refreshAccessToken({
+          refreshToken: refresh,
+          clientId: loadClientId(),
+          clientSecret: secret,
+          tokenEndpoint: resolveTokenEndpoint(),
+        })
+          .then((renovado) => {
+            token = renovado;
+            message = null;
+            store.save(renovado);
+          })
+          .catch(() => {
+            // Renovação indisponível ou recusada é caminho normal, não defeito:
+            // o login já está na tela e é para lá que o usuário vai.
+          });
+      }
     }
   }
 
