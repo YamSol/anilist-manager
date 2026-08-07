@@ -20,7 +20,7 @@
 
 import { AniListError, AuthError, NetworkError, TokenExchangeUnavailableError } from './errors.js';
 import type { Fetcher } from './http.js';
-import { ANILIST_AUTHORIZE_ENDPOINT } from './queries.js';
+import { ANILIST_AUTHORIZE_ENDPOINT, ANILIST_TOKEN_PATH } from './queries.js';
 
 export interface AuthConfig {
   readonly clientId: string;
@@ -316,6 +316,61 @@ export function tokenFromAccessToken(
   }
 
   return { accessToken: trimmed, tokenType: 'Bearer', expiresAt: now + ttlMs };
+}
+
+export interface TokenExchangeSnippetOptions {
+  readonly code: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly redirectUri: string;
+}
+
+/**
+ * Ver RF-08 e AD-11. Monta o comando que o usuário roda no console, **com o
+ * AniList aberto na aba**, quando a hospedagem não tem proxy.
+ *
+ * A barreira da AD-10 é de origem, não de capacidade: numa aba do anilist.co a
+ * requisição ao token endpoint é mesma origem, e o CORS deixa de ser questão. É
+ * por isso que o caminho aqui é relativo — ele só faz sentido rodando lá.
+ *
+ * O corpo é embutido como literal produzido por `JSON.stringify`, e não montado
+ * por concatenação, porque JSON é subconjunto de JS: o escape de aspas, barras e
+ * quebras de linha nos valores sai correto de graça. Um secret com um caractere
+ * infeliz quebraria um snippet montado à mão.
+ *
+ * O resultado é impresso **e** copiado: `copy()` só existe no console, e se ele
+ * não estiver lá, perder a resposta significa refazer a autorização inteira,
+ * porque o code é de uso único.
+ */
+export function buildTokenExchangeSnippet(options: TokenExchangeSnippetOptions): string {
+  const payload = JSON.stringify(
+    {
+      grant_type: 'authorization_code',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      redirect_uri: options.redirectUri.trim(),
+      code: options.code.trim(),
+    },
+    null,
+    2,
+  );
+
+  return `// Cole isto no console com o AniList aberto NESTA aba.
+(async () => {
+  const resposta = await fetch('${ANILIST_TOKEN_PATH}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(${payload.replace(/\n/g, '\n    ')}),
+  });
+  const texto = await resposta.text();
+  console.log(texto);
+  try {
+    copy(texto);
+    console.log('Copiado. Volte ao AniList Manager e cole no campo de resposta.');
+  } catch {
+    console.log('Copie o objeto acima e cole no AniList Manager.');
+  }
+})();`;
 }
 
 /**

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ANILIST_TOKEN_TTL_MS,
   buildAuthorizeUrl,
+  buildTokenExchangeSnippet,
   exchangeCodeForToken,
   isTokenExpired,
   parseAuthCallback,
@@ -378,6 +379,74 @@ describe('probeTokenProxy (RF-07)', () => {
     await probeTokenProxy({ tokenEndpoint: '/base/oauth/token', fetcher });
 
     expect(calledUrl).toBe('/base/oauth/token');
+  });
+});
+
+describe('buildTokenExchangeSnippet (RF-08, AD-11)', () => {
+  const OPCOES = {
+    code: 'def502-code',
+    clientId: '12345',
+    clientSecret: 'segredo-do-usuario',
+    redirectUri: 'https://exemplo.github.io/app/',
+  };
+
+  it('RF-08: leva as quatro informações já preenchidas', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    expect(snippet).toContain('"client_id": "12345"');
+    expect(snippet).toContain('"client_secret": "segredo-do-usuario"');
+    expect(snippet).toContain('"redirect_uri": "https://exemplo.github.io/app/"');
+    expect(snippet).toContain('"code": "def502-code"');
+    expect(snippet).toContain('"grant_type": "authorization_code"');
+  });
+
+  it('AD-11: o caminho é relativo, porque roda na origem do AniList', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    // Absoluto seria inofensivo mas enganoso: sugeriria que a origem não importa,
+    // quando ela é justamente a única razão de o snippet funcionar.
+    expect(snippet).toContain("'/api/v2/oauth/token'");
+    expect(snippet).not.toContain('https://anilist.co');
+  });
+
+  it('RNF-02: um secret com aspas não quebra o snippet nem escapa da string', () => {
+    // O caractere infeliz não é hipotético: um secret com aspas, barra ou quebra
+    // de linha montado por concatenação fecharia a string e viraria código.
+    const secretHostil = 'as"pas\\e\nquebra';
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, clientSecret: secretHostil });
+
+    // O corpo embutido tem de continuar sendo um objeto bem formado…
+    const corpo = /body: JSON\.stringify\((\{[\s\S]*?\n {4}\})\)/.exec(snippet)?.[1];
+    expect(corpo).toBeDefined();
+    expect((JSON.parse(corpo ?? '') as { client_secret: string }).client_secret).toBe(secretHostil);
+
+    // …e o valor tem de aparecer escapado, não cru.
+    expect(snippet).toContain(JSON.stringify(secretHostil));
+    expect(snippet).not.toContain(secretHostil);
+  });
+
+  it('RF-08: aparar espaço em volta dos valores é responsabilidade daqui', () => {
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, code: '  def502-code \n' });
+
+    expect(snippet).toContain('"code": "def502-code"');
+  });
+
+  it('AD-11: o que sai daqui é JavaScript válido, inclusive com valores hostis', () => {
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, clientSecret: 'as"pas\\e\nquebra' });
+
+    // `new Function` compila sem executar. É a única forma, dentro de um teste,
+    // de provar que o texto que o usuário vai colar no console de fato roda lá —
+    // um snippet que não parseia é a falha mais cara possível deste caminho,
+    // porque o authorization code já foi gasto quando ele descobre.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- compila, não invoca; ver acima
+    expect(() => new Function(snippet)).not.toThrow();
+  });
+
+  it('AD-11: imprime E copia, porque o code é de uso único', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    expect(snippet).toContain('console.log(texto)');
+    expect(snippet).toContain('copy(texto)');
   });
 });
 

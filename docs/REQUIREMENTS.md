@@ -341,6 +341,23 @@ export function probeTokenProxy(options?: ProbeTokenProxyOptions): Promise<boole
  */
 export function tokenFromAccessToken(accessToken: string, now: number, ttlMs?: number): StoredToken;
 
+export interface TokenExchangeSnippetOptions {
+  readonly code: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly redirectUri: string;
+}
+
+/**
+ * RF-08, AD-11. Monta o comando que o usuário roda no console COM O ANILIST
+ * ABERTO NA ABA, onde a troca é mesma origem e o CORS não se aplica.
+ *
+ * O corpo é embutido como literal produzido por `JSON.stringify` — JSON é
+ * subconjunto de JS, então o escape de valores hostis sai correto de graça.
+ * O snippet imprime E copia o resultado: o authorization code é de uso único.
+ */
+export function buildTokenExchangeSnippet(options: TokenExchangeSnippetOptions): string;
+
 /**
  * RF-08. Aceita o que o usuário colar: a resposta INTEIRA do token endpoint, ou
  * só o access token cru. Onde não há proxy é ele quem faz a troca (AD-11), e
