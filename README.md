@@ -253,7 +253,8 @@ lembre que ele está na **escala antiga**: marque a opção _"este snapshot est�
 antiga"_ no diff, senão cada entrada vai aparecer como divergente. Com a opção ligada, um
 snapshot pré-conversão comparado contra uma conta já convertida dá zero divergências.
 
-Os arquivos do Python ainda estão versionados e serão removidos numa fase posterior.
+Os arquivos do Python não estão mais versionados: foram removidos em `a5521ce`. Para
+consultá-los, use a tag `0.0.3`, o último ponto em que a v1 existia.
 
 ---
 
