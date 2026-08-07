@@ -13,12 +13,19 @@ import { STORAGE_KEYS, readJson, readRaw, removeRaw, writeJson, writeRaw } from 
 function isStoredToken(value: unknown): value is StoredToken {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
+  // RF-09: ausente é normal — só existe refresh token quando houve troca. Presente
+  // e de outro tipo é storage adulterado, e aí o token inteiro não serve.
+  const refreshOk =
+    candidate.refreshToken === undefined ||
+    (typeof candidate.refreshToken === 'string' && candidate.refreshToken.length > 0);
+
   return (
     typeof candidate.accessToken === 'string' &&
     candidate.accessToken.length > 0 &&
     typeof candidate.tokenType === 'string' &&
     typeof candidate.expiresAt === 'number' &&
-    Number.isFinite(candidate.expiresAt)
+    Number.isFinite(candidate.expiresAt) &&
+    refreshOk
   );
 }
 

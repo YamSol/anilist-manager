@@ -279,6 +279,11 @@ export interface StoredToken {
   readonly accessToken: string;
   readonly tokenType: string;
   readonly expiresAt: number; // epoch ms
+  /**
+   * RF-09. Só existe quando veio de uma troca; um token colado à mão não tem
+   * como produzi-lo. Quando ausente, a CHAVE não existe — não vale `undefined`.
+   */
+  readonly refreshToken?: string;
 }
 
 export interface AuthCallback {

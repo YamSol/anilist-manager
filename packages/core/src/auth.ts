@@ -32,6 +32,14 @@ export interface StoredToken {
   readonly tokenType: string;
   /** Epoch em milissegundos. */
   readonly expiresAt: number;
+  /**
+   * Ver RF-09. Só existe quando veio de uma troca — a entrada manual de um
+   * access token não tem como produzi-lo.
+   *
+   * Opcional de propósito: um token sem refresh é um estado normal e permanente,
+   * não um erro. Quem renova precisa checar antes de tentar.
+   */
+  readonly refreshToken?: string;
 }
 
 /**
@@ -131,6 +139,44 @@ interface TokenResponse {
   readonly access_token?: unknown;
   readonly token_type?: unknown;
   readonly expires_in?: unknown;
+  readonly refresh_token?: unknown;
+}
+
+/**
+ * Converte a resposta do token endpoint num `StoredToken`, uma vez só.
+ *
+ * A mesma resposta chega por dois caminhos — a troca pelo proxy e, onde não há
+ * proxy, colada à mão pelo usuário (AD-11). Interpretá-la em dois lugares seria
+ * a garantia de que um deles esqueceria o `refresh_token` ou o `expires_in`.
+ *
+ * Devolve `null` quando o payload não é uma resposta de token, para que cada
+ * chamador diga o que isso significa no contexto dele.
+ */
+function tokenFromPayload(payload: TokenResponse, now: number): StoredToken | null {
+  if (typeof payload.access_token !== 'string' || payload.access_token.trim().length === 0) {
+    return null;
+  }
+
+  const expiresIn = Number(payload.expires_in);
+  const ttlMs =
+    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : ANILIST_TOKEN_TTL_MS;
+
+  const refreshToken =
+    typeof payload.refresh_token === 'string' && payload.refresh_token.trim().length > 0
+      ? payload.refresh_token.trim()
+      : null;
+
+  return {
+    accessToken: payload.access_token.trim(),
+    tokenType:
+      typeof payload.token_type === 'string' && payload.token_type.length > 0
+        ? payload.token_type
+        : 'Bearer',
+    expiresAt: now + ttlMs,
+    // `exactOptionalPropertyTypes` recusa `refreshToken: undefined`: a chave
+    // precisa não existir, e não existir valendo undefined.
+    ...(refreshToken === null ? {} : { refreshToken }),
+  };
 }
 
 /**
@@ -238,7 +284,8 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new NetworkError('Resposta ilegível do endpoint de token.', { cause });
   }
 
-  if (!response.ok || typeof payload.access_token !== 'string') {
+  const token = response.ok ? tokenFromPayload(payload, now()) : null;
+  if (token === null) {
     const detalhe =
       typeof payload.message === 'string'
         ? payload.message
@@ -248,18 +295,7 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new AuthError(`O AniList recusou a troca do código: ${detalhe}`);
   }
 
-  const expiresIn = Number(payload.expires_in);
-  const ttlMs =
-    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : ANILIST_TOKEN_TTL_MS;
-
-  return {
-    accessToken: payload.access_token,
-    tokenType:
-      typeof payload.token_type === 'string' && payload.token_type.length > 0
-        ? payload.token_type
-        : 'Bearer',
-    expiresAt: now() + ttlMs,
-  };
+  return token;
 }
 
 /**

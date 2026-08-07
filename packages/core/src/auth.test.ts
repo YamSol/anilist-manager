@@ -184,6 +184,39 @@ describe('exchangeCodeForToken (RF-03)', () => {
     expect((await exchangeCodeForToken({ ...BASE, fetcher })).tokenType).toBe('Bearer');
   });
 
+  it('RF-09: guarda o refresh_token que o AniList devolve junto', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok', refresh_token: 'def502-refresh' }));
+
+    await expect(exchangeCodeForToken({ ...BASE, fetcher })).resolves.toMatchObject({
+      accessToken: 'tok',
+      refreshToken: 'def502-refresh',
+    });
+  });
+
+  it('RF-09: sem refresh_token, a CHAVE não existe — não vale undefined', async () => {
+    // `exactOptionalPropertyTypes` distingue os dois, e o storage também: uma
+    // chave com undefined some no JSON.stringify e volta diferente do que saiu.
+    const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ access_token: 'tok' }));
+
+    const token = await exchangeCodeForToken({ ...BASE, fetcher });
+
+    expect('refreshToken' in token).toBe(false);
+  });
+
+  it('RF-09: refresh_token em branco é tratado como ausente', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok', refresh_token: '   ' }));
+
+    expect('refreshToken' in (await exchangeCodeForToken({ ...BASE, fetcher }))).toBe(false);
+  });
+
+  it('RF-05: access_token só de espaços é recusa, não token', async () => {
+    const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ access_token: '   ' }));
+
+    await expect(exchangeCodeForToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(AuthError);
+  });
+
   it('AD-10: 404 no endpoint significa hospedagem sem proxy', async () => {
     const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ erro: 'nao encontrado' }, 404));
 
