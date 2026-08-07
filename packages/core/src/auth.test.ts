@@ -6,6 +6,7 @@ import {
   exchangeCodeForToken,
   isTokenExpired,
   parseAuthCallback,
+  parseTokenResponse,
   probeTokenProxy,
   TOKEN_PROXY_PATH,
   tokenFromAccessToken,
@@ -377,6 +378,60 @@ describe('probeTokenProxy (RF-07)', () => {
     await probeTokenProxy({ tokenEndpoint: '/base/oauth/token', fetcher });
 
     expect(calledUrl).toBe('/base/oauth/token');
+  });
+});
+
+describe('parseTokenResponse (RF-08)', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('RF-08: aceita a resposta inteira do AniList, do jeito que ela sai do console', () => {
+    const colado = JSON.stringify({
+      token_type: 'Bearer',
+      expires_in: 31_536_000,
+      access_token: 'eyJ0eXAiOiJKV1Qi',
+      refresh_token: 'def502-refresh',
+    });
+
+    expect(parseTokenResponse(colado, NOW)).toEqual({
+      accessToken: 'eyJ0eXAiOiJKV1Qi',
+      tokenType: 'Bearer',
+      expiresAt: NOW + 31_536_000_000,
+      refreshToken: 'def502-refresh',
+    });
+  });
+
+  it('RF-04: um access token cru continua valendo', () => {
+    expect(parseTokenResponse('eyJ0eXAiOiJKV1Qi', NOW)).toEqual({
+      accessToken: 'eyJ0eXAiOiJKV1Qi',
+      tokenType: 'Bearer',
+      expiresAt: NOW + ANILIST_TOKEN_TTL_MS,
+    });
+  });
+
+  it('RF-08: tolera espaço e quebra de linha em volta do JSON colado', () => {
+    const colado = `\n  {"access_token":"tok"}  \n`;
+
+    expect(parseTokenResponse(colado, NOW).accessToken).toBe('tok');
+  });
+
+  it('RF-08: a recusa do AniList colada vira AuthError com o motivo dele', () => {
+    const colado = '{"error":"invalid_grant","message":"Authorization code has expired"}';
+
+    expect(() => parseTokenResponse(colado, NOW)).toThrow(AuthError);
+    expect(() => parseTokenResponse(colado, NOW)).toThrow(/Authorization code has expired/);
+  });
+
+  it('RF-31: JSON quebrado tem erro legível, não crash', () => {
+    expect(() => parseTokenResponse('{"access_token":', NOW)).toThrow(AniListError);
+    expect(() => parseTokenResponse('{"access_token":', NOW)).toThrow(/JSON válido/);
+  });
+
+  it('JSON sem access_token nem erro declarado ainda é recusado', () => {
+    expect(() => parseTokenResponse('{"token_type":"Bearer"}', NOW)).toThrow(AniListError);
+  });
+
+  it('entrada em branco é recusada', () => {
+    expect(() => parseTokenResponse('   ', NOW)).toThrow(AniListError);
   });
 });
 

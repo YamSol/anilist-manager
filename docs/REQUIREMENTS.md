@@ -341,6 +341,17 @@ export function probeTokenProxy(options?: ProbeTokenProxyOptions): Promise<boole
  */
 export function tokenFromAccessToken(accessToken: string, now: number, ttlMs?: number): StoredToken;
 
+/**
+ * RF-08. Aceita o que o usuário colar: a resposta INTEIRA do token endpoint, ou
+ * só o access token cru. Onde não há proxy é ele quem faz a troca (AD-11), e
+ * exigir que garimpe o `access_token` de um objeto com dois valores longos e
+ * parecidos é convidar a colar o `refresh_token` por engano.
+ *
+ * Lança `AuthError` quando o JSON colado é uma recusa do AniList, `AniListError`
+ * quando não é uma resposta de token.
+ */
+export function parseTokenResponse(input: string, now: number): StoredToken;
+
 export function isTokenExpired(token: StoredToken, now: number): boolean;
 
 /** Implementado pela camada de UI sobre localStorage. */

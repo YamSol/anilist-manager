@@ -318,6 +318,53 @@ export function tokenFromAccessToken(
   return { accessToken: trimmed, tokenType: 'Bearer', expiresAt: now + ttlMs };
 }
 
+/**
+ * Ver RF-08. Aceita o que o usuário colar: a **resposta inteira** do token
+ * endpoint, ou só o access token cru.
+ *
+ * Onde não há proxy, quem faz a troca é o próprio usuário, no console (AD-11), e
+ * o que ele tem na mão é um objeto JSON com quatro campos e dois valores enormes
+ * e parecidos. Exigir que ele garimpe o `access_token` dali é pedir para colar o
+ * `refresh_token` por engano — os dois são strings longas e opacas, e o erro só
+ * apareceria depois, como um 401 sem explicação.
+ *
+ * Aceitar a resposta inteira ainda captura o `refresh_token` de graça (RF-09),
+ * que a extração manual jogaria fora.
+ */
+export function parseTokenResponse(input: string, now: number): StoredToken {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    throw new AniListError('Cole a resposta do AniList ou um access token.');
+  }
+
+  // Um access token é um JWT: nunca começa com chave. A heurística é do formato,
+  // não do conteúdo, e por isso não precisa acertar sobre o que veio dentro.
+  if (!trimmed.startsWith('{')) {
+    return tokenFromAccessToken(trimmed, now);
+  }
+
+  let payload: TokenResponse & { error?: unknown; message?: unknown };
+  try {
+    payload = JSON.parse(trimmed) as typeof payload;
+  } catch {
+    throw new AniListError('A resposta colada não é um JSON válido. Copie o objeto inteiro.');
+  }
+
+  const token = tokenFromPayload(payload, now);
+  if (token !== null) return token;
+
+  const detalhe =
+    typeof payload.message === 'string'
+      ? payload.message
+      : typeof payload.error === 'string'
+        ? payload.error
+        : null;
+
+  throw detalhe === null
+    ? new AniListError('A resposta colada não tem um access_token.')
+    : new AuthError(`O AniList recusou a troca: ${detalhe}`);
+}
+
 export function isTokenExpired(token: StoredToken, now: number): boolean {
   return now >= token.expiresAt;
 }
