@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:pages": "vite build --mode pages",
     "preview": "vite preview --port 3000",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run"

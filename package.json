@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "npm run dev --workspace @anilist-updater/web",
     "build": "npm run build --workspaces --if-present",
+    "build:pages": "npm run build --workspace @anilist-updater/core && npm run build:pages --workspace @anilist-updater/web",
     "preview": "npm run preview --workspace @anilist-updater/web",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -72,7 +72,8 @@ O Vite sobe em <http://localhost:5173>.
 | Script                  | O que faz                                                            |
 | ----------------------- | -------------------------------------------------------------------- |
 | `npm run dev`           | Servidor de desenvolvimento com HMR, na porta 5173.                  |
-| `npm run build`         | Compila o core e gera `apps/web/dist/`.                              |
+| `npm run build`         | Compila o core e gera `apps/web/dist/`, servido na raiz.             |
+| `npm run build:pages`   | Idem, mas com o prefixo de subcaminho do GitHub Pages.               |
 | `npm run preview`       | Serve o `dist/` já buildado na porta 3000.                           |
 | `npm test`              | Testes unitários e de componente (vitest).                           |
 | `npm run test:watch`    | Idem, em modo watch.                                                 |
@@ -138,6 +139,13 @@ curl -X POST https://anilist.co/api/v2/oauth/token \
        "client_id":"SEU_ID","client_secret":"SEU_SECRET",
        "redirect_uri":"https://seu.site","code":"O_CODE_DA_URL"}'
 ```
+
+Se o host servir o app num **subcaminho** em vez da raiz — o caso de um _project site_ do
+GitHub Pages, em `https://usuario.github.io/repo/` — o `dist/` padrão não serve: o
+`index.html` pediria os assets em `/assets/…` e tomaria 404. Use `npm run build:pages`, que
+lê o prefixo de `apps/web/.env.pages` e o aplica também ao `scope`/`start_url` do PWA e ao
+fallback de navegação do service worker. Para outro subcaminho, mude aquele arquivo ou
+exporte `BASE_PATH`.
 
 ---
 
