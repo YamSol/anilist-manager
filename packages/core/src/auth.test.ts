@@ -6,6 +6,7 @@ import {
   exchangeCodeForToken,
   isTokenExpired,
   parseAuthCallback,
+  probeTokenProxy,
   TOKEN_PROXY_PATH,
   tokenFromAccessToken,
 } from './auth.js';
@@ -271,6 +272,78 @@ describe('exchangeCodeForToken (RF-03)', () => {
     await exchangeCodeForToken({ ...BASE, tokenEndpoint: '/api/troca', fetcher });
 
     expect(calledUrl).toBe('/api/troca');
+  });
+});
+
+describe('probeTokenProxy (RF-07)', () => {
+  function resposta(body: string, status: number, contentType: string): Response {
+    return new Response(body, { status, headers: { 'Content-Type': contentType } });
+  }
+
+  it('RF-07: a recusa do AniList em JSON prova que há proxy', async () => {
+    // Foi o que a API real devolveu à sonda: 400 + JSON. A sonda quer a forma da
+    // resposta, não o conteúdo — recusa é resultado esperado, não falha.
+    const fetcher: Fetcher = () =>
+      Promise.resolve(resposta('{"error":"unsupported_grant_type"}', 400, 'application/json'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(true);
+  });
+
+  it('RF-07: 404 é hospedagem sem proxy', async () => {
+    const fetcher: Fetcher = () => Promise.resolve(resposta('nao encontrado', 404, 'text/plain'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('AD-10: 200 com HTML é o SPA fallback, não um proxy', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(resposta('<!doctype html><html></html>', 200, 'text/html'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('RF-07: falha de rede responde "sem proxy" em vez de lançar', async () => {
+    // Quem chama precisa escolher uma tela, não tratar exceção: rede caída e
+    // ausência de proxy levam ao mesmo caminho.
+    const fetcher: Fetcher = () => Promise.reject(new Error('offline'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('RNF-02: a sonda não leva credencial nem authorization code no corpo', async () => {
+    let body = '';
+    const fetcher: Fetcher = (_url, init) => {
+      body = init.body as string;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ fetcher });
+
+    expect(JSON.parse(body)).toEqual({});
+  });
+
+  it('AD-10: sonda o proxy de mesma origem, nunca o anilist.co', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ fetcher });
+
+    expect(calledUrl).toBe(TOKEN_PROXY_PATH);
+  });
+
+  it('respeita um tokenEndpoint customizado', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ tokenEndpoint: '/base/oauth/token', fetcher });
+
+    expect(calledUrl).toBe('/base/oauth/token');
   });
 });
 

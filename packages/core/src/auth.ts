@@ -134,6 +134,58 @@ interface TokenResponse {
 }
 
 /**
+ * Distingue "o proxy respondeu" de "não há proxy aqui" (AD-10).
+ *
+ * O caso traiçoeiro não é o 404: é o host estático que responde **200 com o
+ * index.html**, porque o SPA fallback pega qualquer caminho desconhecido. Olhar
+ * só o status trataria isso como sucesso. Quem responde JSON neste caminho é o
+ * AniList do outro lado do proxy — inclusive quando recusa, que é o caso normal
+ * de uma sonda.
+ */
+function respondeComoProxy(response: Response): boolean {
+  if (response.status === 404) return false;
+  return (response.headers.get('content-type') ?? '').includes('json');
+}
+
+export interface ProbeTokenProxyOptions {
+  /** Default: `TOKEN_PROXY_PATH`. */
+  readonly tokenEndpoint?: string;
+  readonly fetcher?: Fetcher;
+}
+
+/**
+ * Ver RF-07. Responde se esta hospedagem tem o proxy de troca de token.
+ *
+ * Existe porque descobrir isso pela falha de `exchangeCodeForToken` é tarde
+ * demais: a essa altura o usuário já foi ao AniList, já autorizou e já voltou,
+ * e o code que ele trouxe é de uso único. Perguntar antes é o que permite à UI
+ * oferecer só o caminho que funciona ali (AD-11).
+ *
+ * O corpo é um `{}` deliberadamente inútil: sem `grant_type`, o AniList recusa
+ * com `unsupported_grant_type` — verificado contra a API real. É o que queremos,
+ * porque a resposta que interessa é a *forma* dela, não o conteúdo. Sem
+ * credencial e sem code no corpo, a sonda não tem como consumir nem vazar nada.
+ *
+ * Nunca lança: uma falha de rede é indistinguível de ausência de proxy do ponto
+ * de vista de quem precisa escolher a tela, e as duas levam ao mesmo lugar.
+ */
+export async function probeTokenProxy(options: ProbeTokenProxyOptions = {}): Promise<boolean> {
+  const fetcher = options.fetcher ?? resolveGlobalFetch();
+  const endpoint = options.tokenEndpoint ?? TOKEN_PROXY_PATH;
+
+  try {
+    const response = await fetcher(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}',
+    });
+    return respondeComoProxy(response);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ver RF-03. Troca o authorization code por um access token, via proxy de mesma origem.
  *
  * Lança:
@@ -173,11 +225,7 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new NetworkError('Falha de rede ao trocar o authorization code.', { cause });
   }
 
-  // Sem proxy configurado, o servidor estático responde o index.html do SPA — 200,
-  // mas HTML. Checar só o status deixaria isso passar como sucesso e estourar
-  // depois, longe da causa.
-  const contentType = response.headers.get('content-type') ?? '';
-  if (response.status === 404 || !contentType.includes('json')) {
+  if (!respondeComoProxy(response)) {
     throw new TokenExchangeUnavailableError(
       `Não há proxy de troca de token em ${endpoint}. Esta hospedagem não suporta login direto.`,
     );

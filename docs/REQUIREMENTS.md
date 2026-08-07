@@ -314,6 +314,21 @@ export interface ExchangeCodeOptions {
  */
 export function exchangeCodeForToken(options: ExchangeCodeOptions): Promise<StoredToken>;
 
+export interface ProbeTokenProxyOptions {
+  readonly tokenEndpoint?: string; // default: TOKEN_PROXY_PATH
+  readonly fetcher?: Fetcher;
+}
+
+/**
+ * RF-07. Responde se esta hospedagem tem o proxy de troca, ANTES do redirect.
+ *
+ * Posta um `{}` sem grant_type: o AniList recusa, e é a *forma* da resposta que
+ * responde a pergunta. Sem credencial e sem code no corpo, não consome nada.
+ * Nunca lança — falha de rede devolve `false`, porque quem chama precisa
+ * escolher uma tela, não tratar exceção.
+ */
+export function probeTokenProxy(options?: ProbeTokenProxyOptions): Promise<boolean>;
+
 /**
  * RF-04. Constrói um `StoredToken` a partir de um token colado à mão.
  * A política de expiração do token colado é decidida aqui, uma vez, e não
