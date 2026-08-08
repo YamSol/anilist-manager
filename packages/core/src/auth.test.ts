@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   ANILIST_TOKEN_TTL_MS,
   buildAuthorizeUrl,
+  buildTokenExchangeSnippet,
   exchangeCodeForToken,
   isTokenExpired,
   parseAuthCallback,
+  parseTokenResponse,
+  probeTokenProxy,
+  refreshAccessToken,
   TOKEN_PROXY_PATH,
   tokenFromAccessToken,
 } from './auth.js';
@@ -183,6 +187,39 @@ describe('exchangeCodeForToken (RF-03)', () => {
     expect((await exchangeCodeForToken({ ...BASE, fetcher })).tokenType).toBe('Bearer');
   });
 
+  it('RF-09: guarda o refresh_token que o AniList devolve junto', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok', refresh_token: 'def502-refresh' }));
+
+    await expect(exchangeCodeForToken({ ...BASE, fetcher })).resolves.toMatchObject({
+      accessToken: 'tok',
+      refreshToken: 'def502-refresh',
+    });
+  });
+
+  it('RF-09: sem refresh_token, a CHAVE não existe — não vale undefined', async () => {
+    // `exactOptionalPropertyTypes` distingue os dois, e o storage também: uma
+    // chave com undefined some no JSON.stringify e volta diferente do que saiu.
+    const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ access_token: 'tok' }));
+
+    const token = await exchangeCodeForToken({ ...BASE, fetcher });
+
+    expect('refreshToken' in token).toBe(false);
+  });
+
+  it('RF-09: refresh_token em branco é tratado como ausente', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok', refresh_token: '   ' }));
+
+    expect('refreshToken' in (await exchangeCodeForToken({ ...BASE, fetcher }))).toBe(false);
+  });
+
+  it('RF-05: access_token só de espaços é recusa, não token', async () => {
+    const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ access_token: '   ' }));
+
+    await expect(exchangeCodeForToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(AuthError);
+  });
+
   it('AD-10: 404 no endpoint significa hospedagem sem proxy', async () => {
     const fetcher: Fetcher = () => Promise.resolve(jsonResponse({ erro: 'nao encontrado' }, 404));
 
@@ -271,6 +308,310 @@ describe('exchangeCodeForToken (RF-03)', () => {
     await exchangeCodeForToken({ ...BASE, tokenEndpoint: '/api/troca', fetcher });
 
     expect(calledUrl).toBe('/api/troca');
+  });
+});
+
+describe('refreshAccessToken (RF-09)', () => {
+  const NOW = 1_700_000_000_000;
+  const BASE = {
+    refreshToken: 'def502-refresh',
+    clientId: '12345',
+    clientSecret: 'segredo-do-usuario',
+    now: () => NOW,
+  };
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  it('RF-09: envia grant_type=refresh_token com as credenciais do usuário', async () => {
+    let body: Record<string, unknown> = {};
+    const fetcher: Fetcher = (_url, init) => {
+      body = JSON.parse(init.body as string) as Record<string, unknown>;
+      return Promise.resolve(jsonResponse({ access_token: 'tok-novo' }));
+    };
+
+    await refreshAccessToken({ ...BASE, fetcher });
+
+    expect(body).toEqual({
+      grant_type: 'refresh_token',
+      client_id: '12345',
+      client_secret: 'segredo-do-usuario',
+      refresh_token: 'def502-refresh',
+    });
+    // Nada de redirect_uri nem de code: não é uma autorização, é uma renovação.
+    expect(body).not.toHaveProperty('code');
+  });
+
+  it('RF-09: o refresh token novo substitui o antigo quando vem um', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(jsonResponse({ access_token: 'tok-novo', refresh_token: 'refresh-novo' }));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).resolves.toMatchObject({
+      accessToken: 'tok-novo',
+      refreshToken: 'refresh-novo',
+    });
+  });
+
+  it('AD-10: renova pelo proxy de mesma origem, nunca no anilist.co', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(jsonResponse({ access_token: 'tok' }));
+    };
+
+    await refreshAccessToken({ ...BASE, fetcher });
+
+    expect(calledUrl).toBe(TOKEN_PROXY_PATH);
+  });
+
+  it('RF-09: refresh recusado vira AuthError com o motivo do AniList', async () => {
+    // O caso que mais interessa: se o AniList não habilitar este grant, é aqui
+    // que se descobre, e o chamador precisa poder distinguir isso de rede caída.
+    const fetcher: Fetcher = () =>
+      Promise.resolve(
+        jsonResponse({ error: 'unsupported_grant_type', message: 'Grant não suportado' }, 400),
+      );
+
+    const promise = refreshAccessToken({ ...BASE, fetcher });
+
+    await expect(promise).rejects.toBeInstanceOf(AuthError);
+    await expect(promise).rejects.toThrow(/renovação: Grant não suportado/);
+  });
+
+  it('AD-10: sem proxy, renovar é tão impossível quanto trocar', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } }));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(
+      TokenExchangeUnavailableError,
+    );
+  });
+
+  it('RF-09: refresh token em branco falha antes de ir à rede', async () => {
+    let chamou = false;
+    const fetcher: Fetcher = () => {
+      chamou = true;
+      return Promise.resolve(jsonResponse({ access_token: 'tok' }));
+    };
+
+    await expect(
+      refreshAccessToken({ ...BASE, refreshToken: ' ', fetcher }),
+    ).rejects.toBeInstanceOf(AniListError);
+    expect(chamou).toBe(false);
+  });
+
+  it('RF-02: sem secret, nem tenta', async () => {
+    await expect(
+      refreshAccessToken({
+        ...BASE,
+        clientSecret: '  ',
+        fetcher: () => Promise.reject(new Error()),
+      }),
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('falha de transporte vira NetworkError', async () => {
+    const fetcher: Fetcher = () => Promise.reject(new Error('offline'));
+
+    await expect(refreshAccessToken({ ...BASE, fetcher })).rejects.toBeInstanceOf(NetworkError);
+  });
+});
+
+describe('probeTokenProxy (RF-07)', () => {
+  function resposta(body: string, status: number, contentType: string): Response {
+    return new Response(body, { status, headers: { 'Content-Type': contentType } });
+  }
+
+  it('RF-07: a recusa do AniList em JSON prova que há proxy', async () => {
+    // Foi o que a API real devolveu à sonda: 400 + JSON. A sonda quer a forma da
+    // resposta, não o conteúdo — recusa é resultado esperado, não falha.
+    const fetcher: Fetcher = () =>
+      Promise.resolve(resposta('{"error":"unsupported_grant_type"}', 400, 'application/json'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(true);
+  });
+
+  it('RF-07: 404 é hospedagem sem proxy', async () => {
+    const fetcher: Fetcher = () => Promise.resolve(resposta('nao encontrado', 404, 'text/plain'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('AD-10: 200 com HTML é o SPA fallback, não um proxy', async () => {
+    const fetcher: Fetcher = () =>
+      Promise.resolve(resposta('<!doctype html><html></html>', 200, 'text/html'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('RF-07: falha de rede responde "sem proxy" em vez de lançar', async () => {
+    // Quem chama precisa escolher uma tela, não tratar exceção: rede caída e
+    // ausência de proxy levam ao mesmo caminho.
+    const fetcher: Fetcher = () => Promise.reject(new Error('offline'));
+
+    await expect(probeTokenProxy({ fetcher })).resolves.toBe(false);
+  });
+
+  it('RNF-02: a sonda não leva credencial nem authorization code no corpo', async () => {
+    let body = '';
+    const fetcher: Fetcher = (_url, init) => {
+      body = init.body as string;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ fetcher });
+
+    expect(JSON.parse(body)).toEqual({});
+  });
+
+  it('AD-10: sonda o proxy de mesma origem, nunca o anilist.co', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ fetcher });
+
+    expect(calledUrl).toBe(TOKEN_PROXY_PATH);
+  });
+
+  it('respeita um tokenEndpoint customizado', async () => {
+    let calledUrl = '';
+    const fetcher: Fetcher = (url) => {
+      calledUrl = url;
+      return Promise.resolve(resposta('{}', 400, 'application/json'));
+    };
+
+    await probeTokenProxy({ tokenEndpoint: '/base/oauth/token', fetcher });
+
+    expect(calledUrl).toBe('/base/oauth/token');
+  });
+});
+
+describe('buildTokenExchangeSnippet (RF-08, AD-11)', () => {
+  const OPCOES = {
+    code: 'def502-code',
+    clientId: '12345',
+    clientSecret: 'segredo-do-usuario',
+    redirectUri: 'https://exemplo.github.io/app/',
+  };
+
+  it('RF-08: leva as quatro informações já preenchidas', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    expect(snippet).toContain('"client_id": "12345"');
+    expect(snippet).toContain('"client_secret": "segredo-do-usuario"');
+    expect(snippet).toContain('"redirect_uri": "https://exemplo.github.io/app/"');
+    expect(snippet).toContain('"code": "def502-code"');
+    expect(snippet).toContain('"grant_type": "authorization_code"');
+  });
+
+  it('AD-11: o caminho é relativo, porque roda na origem do AniList', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    // Absoluto seria inofensivo mas enganoso: sugeriria que a origem não importa,
+    // quando ela é justamente a única razão de o snippet funcionar.
+    expect(snippet).toContain("'/api/v2/oauth/token'");
+    expect(snippet).not.toContain('https://anilist.co');
+  });
+
+  it('RNF-02: um secret com aspas não quebra o snippet nem escapa da string', () => {
+    // O caractere infeliz não é hipotético: um secret com aspas, barra ou quebra
+    // de linha montado por concatenação fecharia a string e viraria código.
+    const secretHostil = 'as"pas\\e\nquebra';
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, clientSecret: secretHostil });
+
+    // O corpo embutido tem de continuar sendo um objeto bem formado…
+    const corpo = /body: JSON\.stringify\((\{[\s\S]*?\n {4}\})\)/.exec(snippet)?.[1];
+    expect(corpo).toBeDefined();
+    expect((JSON.parse(corpo ?? '') as { client_secret: string }).client_secret).toBe(secretHostil);
+
+    // …e o valor tem de aparecer escapado, não cru.
+    expect(snippet).toContain(JSON.stringify(secretHostil));
+    expect(snippet).not.toContain(secretHostil);
+  });
+
+  it('RF-08: aparar espaço em volta dos valores é responsabilidade daqui', () => {
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, code: '  def502-code \n' });
+
+    expect(snippet).toContain('"code": "def502-code"');
+  });
+
+  it('AD-11: o que sai daqui é JavaScript válido, inclusive com valores hostis', () => {
+    const snippet = buildTokenExchangeSnippet({ ...OPCOES, clientSecret: 'as"pas\\e\nquebra' });
+
+    // `new Function` compila sem executar. É a única forma, dentro de um teste,
+    // de provar que o texto que o usuário vai colar no console de fato roda lá —
+    // um snippet que não parseia é a falha mais cara possível deste caminho,
+    // porque o authorization code já foi gasto quando ele descobre.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- compila, não invoca; ver acima
+    expect(() => new Function(snippet)).not.toThrow();
+  });
+
+  it('AD-11: imprime E copia, porque o code é de uso único', () => {
+    const snippet = buildTokenExchangeSnippet(OPCOES);
+
+    expect(snippet).toContain('console.log(texto)');
+    expect(snippet).toContain('copy(texto)');
+  });
+});
+
+describe('parseTokenResponse (RF-08)', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('RF-08: aceita a resposta inteira do AniList, do jeito que ela sai do console', () => {
+    const colado = JSON.stringify({
+      token_type: 'Bearer',
+      expires_in: 31_536_000,
+      access_token: 'eyJ0eXAiOiJKV1Qi',
+      refresh_token: 'def502-refresh',
+    });
+
+    expect(parseTokenResponse(colado, NOW)).toEqual({
+      accessToken: 'eyJ0eXAiOiJKV1Qi',
+      tokenType: 'Bearer',
+      expiresAt: NOW + 31_536_000_000,
+      refreshToken: 'def502-refresh',
+    });
+  });
+
+  it('RF-04: um access token cru continua valendo', () => {
+    expect(parseTokenResponse('eyJ0eXAiOiJKV1Qi', NOW)).toEqual({
+      accessToken: 'eyJ0eXAiOiJKV1Qi',
+      tokenType: 'Bearer',
+      expiresAt: NOW + ANILIST_TOKEN_TTL_MS,
+    });
+  });
+
+  it('RF-08: tolera espaço e quebra de linha em volta do JSON colado', () => {
+    const colado = `\n  {"access_token":"tok"}  \n`;
+
+    expect(parseTokenResponse(colado, NOW).accessToken).toBe('tok');
+  });
+
+  it('RF-08: a recusa do AniList colada vira AuthError com o motivo dele', () => {
+    const colado = '{"error":"invalid_grant","message":"Authorization code has expired"}';
+
+    expect(() => parseTokenResponse(colado, NOW)).toThrow(AuthError);
+    expect(() => parseTokenResponse(colado, NOW)).toThrow(/Authorization code has expired/);
+  });
+
+  it('RF-31: JSON quebrado tem erro legível, não crash', () => {
+    expect(() => parseTokenResponse('{"access_token":', NOW)).toThrow(AniListError);
+    expect(() => parseTokenResponse('{"access_token":', NOW)).toThrow(/JSON válido/);
+  });
+
+  it('JSON sem access_token nem erro declarado ainda é recusado', () => {
+    expect(() => parseTokenResponse('{"token_type":"Bearer"}', NOW)).toThrow(AniListError);
+  });
+
+  it('entrada em branco é recusada', () => {
+    expect(() => parseTokenResponse('   ', NOW)).toThrow(AniListError);
   });
 });
 

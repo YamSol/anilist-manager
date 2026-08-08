@@ -93,7 +93,27 @@ describe('App', () => {
     expect(exchangeCodeForToken).not.toHaveBeenCalled();
   });
 
-  it('AD-10: sem proxy, a falha da troca leva a colar token em vez de tela branca', async () => {
+  it('RF-08: sem proxy, o app conduz a troca com o code que ele mesmo capturou', async () => {
+    const { TokenExchangeUnavailableError } = await import('@anilist-updater/core');
+    saveClientId('12345');
+    saveClientSecret('segredo-do-usuario');
+    exchangeCodeForToken.mockRejectedValue(new TokenExchangeUnavailableError('sem proxy'));
+    history.replaceState(null, '', '/?code=code-abc');
+
+    render(App, {});
+
+    // O comando sai pronto: nada de copiar o code da barra de endereços.
+    const comando = await screen.findByText(/grant_type/);
+    expect(comando.textContent).toContain('code-abc');
+    expect(comando.textContent).toContain('segredo-do-usuario');
+    expect(screen.getByLabelText('Resposta do AniList')).toBeInTheDocument();
+
+    // Hospedagem sem proxy não é erro do usuário, e não vira alerta vermelho.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(location.search).toBe('');
+  });
+
+  it('RF-08: sem credenciais salvas, sobra o caminho de colar um token', async () => {
     const { TokenExchangeUnavailableError } = await import('@anilist-updater/core');
     saveClientSecret('segredo');
     exchangeCodeForToken.mockRejectedValue(new TokenExchangeUnavailableError('sem proxy'));
@@ -101,11 +121,12 @@ describe('App', () => {
 
     render(App, {});
 
+    // Sem Client ID o comando sairia incompleto e falharia no console: melhor
+    // não oferecê-lo do que oferecer um que só pode dar errado.
     await waitFor(() => {
       expect(screen.getByLabelText('Access token')).toBeInTheDocument();
     });
-    expect(screen.getByRole('alert')).toBeInTheDocument();
-    expect(location.search).toBe('');
+    expect(screen.queryByText(/grant_type/)).not.toBeInTheDocument();
   });
 
   it('RF-03: recusa do usuário no AniList vira mensagem, não travamento', async () => {

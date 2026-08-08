@@ -56,3 +56,12 @@ export const UPDATE_PRIORITY_MUTATION = /* GraphQL */ `
 
 export const ANILIST_GRAPHQL_ENDPOINT = 'https://graphql.anilist.co';
 export const ANILIST_AUTHORIZE_ENDPOINT = 'https://anilist.co/api/v2/oauth/authorize';
+
+/**
+ * O token endpoint, como caminho **relativo à origem do AniList**.
+ *
+ * Relativo de propósito: nós nunca o chamamos por aqui — não dá, ele não manda
+ * CORS (AD-10). Quem o chama é o console aberto numa aba do próprio anilist.co,
+ * onde isto é mesma origem e o CORS deixa de existir (AD-11).
+ */
+export const ANILIST_TOKEN_PATH = '/api/v2/oauth/token';

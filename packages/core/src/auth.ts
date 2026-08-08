@@ -20,7 +20,7 @@
 
 import { AniListError, AuthError, NetworkError, TokenExchangeUnavailableError } from './errors.js';
 import type { Fetcher } from './http.js';
-import { ANILIST_AUTHORIZE_ENDPOINT } from './queries.js';
+import { ANILIST_AUTHORIZE_ENDPOINT, ANILIST_TOKEN_PATH } from './queries.js';
 
 export interface AuthConfig {
   readonly clientId: string;
@@ -32,6 +32,14 @@ export interface StoredToken {
   readonly tokenType: string;
   /** Epoch em milissegundos. */
   readonly expiresAt: number;
+  /**
+   * Ver RF-09. Só existe quando veio de uma troca — a entrada manual de um
+   * access token não tem como produzi-lo.
+   *
+   * Opcional de propósito: um token sem refresh é um estado normal e permanente,
+   * não um erro. Quem renova precisa checar antes de tentar.
+   */
+  readonly refreshToken?: string;
 }
 
 /**
@@ -131,6 +139,98 @@ interface TokenResponse {
   readonly access_token?: unknown;
   readonly token_type?: unknown;
   readonly expires_in?: unknown;
+  readonly refresh_token?: unknown;
+}
+
+/**
+ * Converte a resposta do token endpoint num `StoredToken`, uma vez só.
+ *
+ * A mesma resposta chega por dois caminhos — a troca pelo proxy e, onde não há
+ * proxy, colada à mão pelo usuário (AD-11). Interpretá-la em dois lugares seria
+ * a garantia de que um deles esqueceria o `refresh_token` ou o `expires_in`.
+ *
+ * Devolve `null` quando o payload não é uma resposta de token, para que cada
+ * chamador diga o que isso significa no contexto dele.
+ */
+function tokenFromPayload(payload: TokenResponse, now: number): StoredToken | null {
+  if (typeof payload.access_token !== 'string' || payload.access_token.trim().length === 0) {
+    return null;
+  }
+
+  const expiresIn = Number(payload.expires_in);
+  const ttlMs =
+    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : ANILIST_TOKEN_TTL_MS;
+
+  const refreshToken =
+    typeof payload.refresh_token === 'string' && payload.refresh_token.trim().length > 0
+      ? payload.refresh_token.trim()
+      : null;
+
+  return {
+    accessToken: payload.access_token.trim(),
+    tokenType:
+      typeof payload.token_type === 'string' && payload.token_type.length > 0
+        ? payload.token_type
+        : 'Bearer',
+    expiresAt: now + ttlMs,
+    // `exactOptionalPropertyTypes` recusa `refreshToken: undefined`: a chave
+    // precisa não existir, e não existir valendo undefined.
+    ...(refreshToken === null ? {} : { refreshToken }),
+  };
+}
+
+/**
+ * Distingue "o proxy respondeu" de "não há proxy aqui" (AD-10).
+ *
+ * O caso traiçoeiro não é o 404: é o host estático que responde **200 com o
+ * index.html**, porque o SPA fallback pega qualquer caminho desconhecido. Olhar
+ * só o status trataria isso como sucesso. Quem responde JSON neste caminho é o
+ * AniList do outro lado do proxy — inclusive quando recusa, que é o caso normal
+ * de uma sonda.
+ */
+function respondeComoProxy(response: Response): boolean {
+  if (response.status === 404) return false;
+  return (response.headers.get('content-type') ?? '').includes('json');
+}
+
+export interface ProbeTokenProxyOptions {
+  /** Default: `TOKEN_PROXY_PATH`. */
+  readonly tokenEndpoint?: string;
+  readonly fetcher?: Fetcher;
+}
+
+/**
+ * Ver RF-07. Responde se esta hospedagem tem o proxy de troca de token.
+ *
+ * Existe porque descobrir isso pela falha de `exchangeCodeForToken` é tarde
+ * demais: a essa altura o usuário já foi ao AniList, já autorizou e já voltou,
+ * e o code que ele trouxe é de uso único. Perguntar antes é o que permite à UI
+ * oferecer só o caminho que funciona ali (AD-11).
+ *
+ * O corpo é um `{}` deliberadamente inútil: sem `grant_type`, o AniList recusa
+ * com `unsupported_grant_type` — verificado contra a API real. É o que queremos,
+ * porque a resposta que interessa é a *forma* dela, não o conteúdo. Sem
+ * credencial e sem code no corpo, a sonda não tem como consumir nem vazar nada.
+ *
+ * Nunca lança: uma falha de rede é indistinguível de ausência de proxy do ponto
+ * de vista de quem precisa escolher a tela, e as duas levam ao mesmo lugar.
+ */
+export async function probeTokenProxy(options: ProbeTokenProxyOptions = {}): Promise<boolean> {
+  const endpoint = options.tokenEndpoint ?? TOKEN_PROXY_PATH;
+
+  try {
+    // A resolução do fetch entra no try: num ambiente sem fetch global, "não dá
+    // para sondar" é a mesma resposta prática que "não há proxy".
+    const fetcher = options.fetcher ?? resolveGlobalFetch();
+    const response = await fetcher(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}',
+    });
+    return respondeComoProxy(response);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -156,30 +256,53 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new AuthError('Client Secret não informado. Ver RF-02.');
   }
 
+  return postarNoTokenEndpoint({
+    fetcher,
+    endpoint,
+    now,
+    recusa: 'O AniList recusou a troca do código',
+    body: {
+      grant_type: 'authorization_code',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      redirect_uri: options.redirectUri,
+      code: options.code.trim(),
+    },
+  });
+}
+
+interface PostTokenOptions {
+  readonly fetcher: Fetcher;
+  readonly endpoint: string;
+  readonly now: () => number;
+  /** Início da mensagem de `AuthError`, completado com o motivo do AniList. */
+  readonly recusa: string;
+  readonly body: Readonly<Record<string, string>>;
+}
+
+/**
+ * O POST no endpoint de token, com a mesma classificação de erro para todos os
+ * grants que passam por ali (AD-10).
+ *
+ * O que precisa ser idêntico entre a troca e a renovação não é o corpo — é o
+ * tratamento: distinguir "não há proxy aqui" de "o AniList recusou" e de "a rede
+ * caiu" é o que decide qual tela aparece, e duas cópias dessa decisão divergem.
+ */
+async function postarNoTokenEndpoint(options: PostTokenOptions): Promise<StoredToken> {
   let response: Response;
   try {
-    response = await fetcher(endpoint, {
+    response = await options.fetcher(options.endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        client_id: options.clientId.trim(),
-        client_secret: options.clientSecret.trim(),
-        redirect_uri: options.redirectUri,
-        code: options.code.trim(),
-      }),
+      body: JSON.stringify(options.body),
     });
   } catch (cause) {
-    throw new NetworkError('Falha de rede ao trocar o authorization code.', { cause });
+    throw new NetworkError('Falha de rede ao falar com o endpoint de token.', { cause });
   }
 
-  // Sem proxy configurado, o servidor estático responde o index.html do SPA — 200,
-  // mas HTML. Checar só o status deixaria isso passar como sucesso e estourar
-  // depois, longe da causa.
-  const contentType = response.headers.get('content-type') ?? '';
-  if (response.status === 404 || !contentType.includes('json')) {
+  if (!respondeComoProxy(response)) {
     throw new TokenExchangeUnavailableError(
-      `Não há proxy de troca de token em ${endpoint}. Esta hospedagem não suporta login direto.`,
+      `Não há proxy de troca de token em ${options.endpoint}. Esta hospedagem não suporta login direto.`,
     );
   }
 
@@ -190,28 +313,69 @@ export async function exchangeCodeForToken(options: ExchangeCodeOptions): Promis
     throw new NetworkError('Resposta ilegível do endpoint de token.', { cause });
   }
 
-  if (!response.ok || typeof payload.access_token !== 'string') {
+  const token = response.ok ? tokenFromPayload(payload, options.now()) : null;
+  if (token === null) {
     const detalhe =
       typeof payload.message === 'string'
         ? payload.message
         : typeof payload.error === 'string'
           ? payload.error
           : `HTTP ${String(response.status)}`;
-    throw new AuthError(`O AniList recusou a troca do código: ${detalhe}`);
+    throw new AuthError(`${options.recusa}: ${detalhe}`);
   }
 
-  const expiresIn = Number(payload.expires_in);
-  const ttlMs =
-    Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn * 1000 : ANILIST_TOKEN_TTL_MS;
+  return token;
+}
 
-  return {
-    accessToken: payload.access_token,
-    tokenType:
-      typeof payload.token_type === 'string' && payload.token_type.length > 0
-        ? payload.token_type
-        : 'Bearer',
-    expiresAt: now() + ttlMs,
-  };
+export interface RefreshTokenOptions {
+  readonly refreshToken: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  /** Default: `TOKEN_PROXY_PATH`. Um caminho de mesma origem, nunca anilist.co. */
+  readonly tokenEndpoint?: string;
+  readonly fetcher?: Fetcher;
+  readonly now?: () => number;
+}
+
+/**
+ * Ver RF-09. Troca o refresh token por um access token novo.
+ *
+ * ⚠️ **Não verificado contra a API real.** O AniList devolve `refresh_token` na
+ * troca, e `grant_type=refresh_token` é o que o league/oauth2-server — que é o
+ * servidor por trás daquele endpoint — implementa. Mas se o grant está *ligado*
+ * lá é outra pergunta, e responder a ela exige um refresh token válido, que só
+ * um login real produz. O implicit grant já ensinou que "a biblioteca suporta"
+ * não implica "está habilitado" (AD-05).
+ *
+ * Por isso quem chama trata a falha como caminho normal e cai no login, em vez
+ * de tratá-la como defeito.
+ *
+ * Passa pelo mesmo proxy da troca, pelo mesmo motivo: o endpoint não manda CORS.
+ */
+export async function refreshAccessToken(options: RefreshTokenOptions): Promise<StoredToken> {
+  const fetcher = options.fetcher ?? resolveGlobalFetch();
+  const now = options.now ?? (() => Date.now());
+  const endpoint = options.tokenEndpoint ?? TOKEN_PROXY_PATH;
+
+  if (options.refreshToken.trim().length === 0) {
+    throw new AniListError('Refresh token ausente.');
+  }
+  if (options.clientSecret.trim().length === 0) {
+    throw new AuthError('Client Secret não informado. Ver RF-02.');
+  }
+
+  return postarNoTokenEndpoint({
+    fetcher,
+    endpoint,
+    now,
+    recusa: 'O AniList recusou a renovação',
+    body: {
+      grant_type: 'refresh_token',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      refresh_token: options.refreshToken.trim(),
+    },
+  });
 }
 
 /**
@@ -232,6 +396,108 @@ export function tokenFromAccessToken(
   }
 
   return { accessToken: trimmed, tokenType: 'Bearer', expiresAt: now + ttlMs };
+}
+
+export interface TokenExchangeSnippetOptions {
+  readonly code: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly redirectUri: string;
+}
+
+/**
+ * Ver RF-08 e AD-11. Monta o comando que o usuário roda no console, **com o
+ * AniList aberto na aba**, quando a hospedagem não tem proxy.
+ *
+ * A barreira da AD-10 é de origem, não de capacidade: numa aba do anilist.co a
+ * requisição ao token endpoint é mesma origem, e o CORS deixa de ser questão. É
+ * por isso que o caminho aqui é relativo — ele só faz sentido rodando lá.
+ *
+ * O corpo é embutido como literal produzido por `JSON.stringify`, e não montado
+ * por concatenação, porque JSON é subconjunto de JS: o escape de aspas, barras e
+ * quebras de linha nos valores sai correto de graça. Um secret com um caractere
+ * infeliz quebraria um snippet montado à mão.
+ *
+ * O resultado é impresso **e** copiado: `copy()` só existe no console, e se ele
+ * não estiver lá, perder a resposta significa refazer a autorização inteira,
+ * porque o code é de uso único.
+ */
+export function buildTokenExchangeSnippet(options: TokenExchangeSnippetOptions): string {
+  const payload = JSON.stringify(
+    {
+      grant_type: 'authorization_code',
+      client_id: options.clientId.trim(),
+      client_secret: options.clientSecret.trim(),
+      redirect_uri: options.redirectUri.trim(),
+      code: options.code.trim(),
+    },
+    null,
+    2,
+  );
+
+  return `// Cole isto no console com o AniList aberto NESTA aba.
+(async () => {
+  const resposta = await fetch('${ANILIST_TOKEN_PATH}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(${payload.replace(/\n/g, '\n    ')}),
+  });
+  const texto = await resposta.text();
+  console.log(texto);
+  try {
+    copy(texto);
+    console.log('Copiado. Volte ao AniList Manager e cole no campo de resposta.');
+  } catch {
+    console.log('Copie o objeto acima e cole no AniList Manager.');
+  }
+})();`;
+}
+
+/**
+ * Ver RF-08. Aceita o que o usuário colar: a **resposta inteira** do token
+ * endpoint, ou só o access token cru.
+ *
+ * Onde não há proxy, quem faz a troca é o próprio usuário, no console (AD-11), e
+ * o que ele tem na mão é um objeto JSON com quatro campos e dois valores enormes
+ * e parecidos. Exigir que ele garimpe o `access_token` dali é pedir para colar o
+ * `refresh_token` por engano — os dois são strings longas e opacas, e o erro só
+ * apareceria depois, como um 401 sem explicação.
+ *
+ * Aceitar a resposta inteira ainda captura o `refresh_token` de graça (RF-09),
+ * que a extração manual jogaria fora.
+ */
+export function parseTokenResponse(input: string, now: number): StoredToken {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    throw new AniListError('Cole a resposta do AniList ou um access token.');
+  }
+
+  // Um access token é um JWT: nunca começa com chave. A heurística é do formato,
+  // não do conteúdo, e por isso não precisa acertar sobre o que veio dentro.
+  if (!trimmed.startsWith('{')) {
+    return tokenFromAccessToken(trimmed, now);
+  }
+
+  let payload: TokenResponse & { error?: unknown; message?: unknown };
+  try {
+    payload = JSON.parse(trimmed) as typeof payload;
+  } catch {
+    throw new AniListError('A resposta colada não é um JSON válido. Copie o objeto inteiro.');
+  }
+
+  const token = tokenFromPayload(payload, now);
+  if (token !== null) return token;
+
+  const detalhe =
+    typeof payload.message === 'string'
+      ? payload.message
+      : typeof payload.error === 'string'
+        ? payload.error
+        : null;
+
+  throw detalhe === null
+    ? new AniListError('A resposta colada não tem um access_token.')
+    : new AuthError(`O AniList recusou a troca: ${detalhe}`);
 }
 
 export function isTokenExpired(token: StoredToken, now: number): boolean {

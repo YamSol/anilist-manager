@@ -126,26 +126,50 @@ O secret que você cola é **do seu próprio client**, não da aplicação:
 - só trafega da sua máquina para o AniList, pelo proxy — que não registra o corpo em log;
 - não existe nenhum segredo versionado no repositório nem embutido no build.
 
+Se ele vazar (num print, num log, numa conversa), regenere-o em
+<https://anilist.co/settings/developer>: isso invalida os tokens emitidos com ele.
+
 ### Hospedagem estática, sem proxy
 
-Num host que serve só arquivos (GitHub Pages, sr.ht pages) não há proxy, e o app detecta
-isso: em vez de falhar, ele passa a pedir um **access token colado**. Você faz a troca uma
-vez por fora e cola o resultado — o token do AniList vale um ano.
+Num host que serve só arquivos (GitHub Pages, sr.ht pages) não há proxy. O app **descobre
+isso ao abrir**, antes de você clicar em qualquer coisa, e avisa que o login vai ter um
+passo a mais. Ele não some com o botão de entrar: o redirect continua sendo como o app
+obtém o código.
+
+O que muda é a volta. Em vez de dar erro, ele:
+
+1. captura o `?code=` sozinho — você não copia nada da barra de endereços;
+2. monta um comando **já preenchido** com client id, secret, redirect uri e o código;
+3. pede que você o cole no console do navegador **com o `anilist.co` aberto na aba**;
+4. aceita a resposta inteira colada de volta, do jeito que ela sai do console.
+
+O console do `anilist.co` funciona onde a página do app não funciona porque ali a
+requisição é **mesma origem** — a barreira nunca foi o navegador, foi a origem. Não é
+preciso terminal, não há aspas para escapar, e o comportamento é o mesmo nos três sistemas.
+
+Colar a resposta inteira também guarda o `refresh_token`, que extrair só o `access_token`
+jogaria fora. O access token vale um ano.
+
+> Navegador de celular não tem console utilizável. Sem proxy e sem desktop, o caminho
+> continua sendo colar um access token obtido de outro jeito.
+
+### Deploy num subcaminho (GitHub Pages)
+
+Um _project site_ (`https://usuario.github.io/repo/`) serve o app num subcaminho, e o
+`dist/` padrão não vale ali: o `index.html` pediria os assets em `/assets/…` e tomaria 404.
+
+**Não edite o `base` no `vite.config.ts`** — isso quebra dev, `preview` e o container, e
+volta como conflito a cada `git pull`. O prefixo é propriedade de um alvo de deploy, e entra
+por fora:
 
 ```bash
-curl -X POST https://anilist.co/api/v2/oauth/token \
-  -H 'Content-Type: application/json' \
-  -d '{"grant_type":"authorization_code",
-       "client_id":"SEU_ID","client_secret":"SEU_SECRET",
-       "redirect_uri":"https://seu.site","code":"O_CODE_DA_URL"}'
+npm run build:pages                       # lê apps/web/.env.pages
+cp -r apps/web/dist/* ../seu-repo-pages/  # e commite lá
 ```
 
-Se o host servir o app num **subcaminho** em vez da raiz — o caso de um _project site_ do
-GitHub Pages, em `https://usuario.github.io/repo/` — o `dist/` padrão não serve: o
-`index.html` pediria os assets em `/assets/…` e tomaria 404. Use `npm run build:pages`, que
-lê o prefixo de `apps/web/.env.pages` e o aplica também ao `scope`/`start_url` do PWA e ao
-fallback de navegação do service worker. Para outro subcaminho, mude aquele arquivo ou
-exporte `BASE_PATH`.
+`build:pages` aplica o prefixo também ao `scope`/`start_url` do PWA e ao fallback de
+navegação do service worker. Para outro subcaminho, mude `apps/web/.env.pages` ou exporte
+`BASE_PATH`.
 
 ---
 
