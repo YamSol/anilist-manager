@@ -84,6 +84,21 @@ o caminho como `TOKEN_PROXY_PATH`.
 Antes de "simplificar" isso de volta para implicit grant, releia AD-10 no REQUIREMENTS: já
 foi tentado, e não funciona.
 
+Onde não há proxy, a troca acontece no **console do navegador aberto em `anilist.co`**
+(AD-11) — ali é mesma origem, e o CORS deixa de se aplicar. O app monta o comando
+preenchido (`buildTokenExchangeSnippet`) e aceita a resposta inteira colada de volta
+(`parseTokenResponse`). Nada disso pede terminal, e nada disso manda o secret do usuário
+para uma máquina que não seja o AniList — um proxy CORS de terceiro resolveria a UI e
+violaria RNF-02 e RNF-11.
+
+A capacidade da hospedagem é descoberta por `probeTokenProxy` **antes** do redirect
+(RF-07). O prefixo de subcaminho do build entra por `resolveTokenEndpoint` na camada web,
+nunca no core.
+
+`refreshAccessToken` existe e está testado, mas **`grant_type=refresh_token` nunca foi
+verificado contra a API real** — verificar exige um refresh token válido. Trate a falha
+dele como caminho normal, não como bug.
+
 ### `docs/REQUIREMENTS.md` §5 é contrato congelado
 
 A superfície pública de `packages/core` está congelada ali porque frentes paralelas
