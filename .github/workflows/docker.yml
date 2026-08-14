@@ -1,0 +1,67 @@
+# Publica a imagem do container no GitHub Container Registry.
+#
+# Em tag `v*` builda e publica; em PR que mexe no empacotamento, builda e descarta. O
+# segundo caso existe para o Dockerfile não apodrecer em silêncio até a próxima release.
+name: Publish image
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: ['master']
+    paths:
+      - 'deploy/**'
+      - 'package-lock.json'
+      - '.github/workflows/docker.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: build + push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Numa PR nada é publicado, então não há por que autenticar.
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A action normaliza o nome do repositório para minúsculas — o GHCR recusa
+      # maiúsculas, e `github.repository` traz `YamSol/…`.
+      #
+      # O `latest` sai do flavor padrão (`latest=auto`): acompanha a maior semver e é
+      # omitido em pré-release (`v3.0.0-rc.1` não vira `latest`).
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      # O contexto é a raiz: o Dockerfile é multi-stage e copia os manifests do monorepo
+      # inteiro antes do `npm ci`.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
