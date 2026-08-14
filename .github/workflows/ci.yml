@@ -1,0 +1,79 @@
+# Verificação em PR e em push para master.
+#
+# O `.build.yml` (sourcehut) já roda lint/typecheck/coverage/build no espelho. O `verify`
+# aqui é deliberadamente redundante com ele: é o que dá status check bloqueante na PR,
+# que a sr.ht não alcança. O `e2e` é o que só existe aqui — ver o comentário no job.
+name: CI
+
+on:
+  push:
+    branches: ['master']
+  pull_request:
+    branches: ['master']
+
+# Um push novo na mesma ref torna a execução anterior obsoleta.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `npm ci` dispara o `prepare`, que instala git hooks que não servem a um runner.
+  HUSKY: 0
+
+jobs:
+  verify:
+    name: lint + typecheck + coverage + build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A versão vem de engines.node no package.json — fonte única de suporte.
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # RNF-08: o threshold de 90% do core está no vitest.config.ts e derruba este job
+      # sozinho. `verify` = lint + typecheck + test:coverage + build.
+      - name: Verify
+        run: npm run verify
+
+  e2e:
+    name: playwright
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # O `.build.yml` documenta por que o e2e fica de fora lá: os browsers do playwright
+      # são binários glibc e não rodam no alpine/musl da sr.ht. `ubuntu-latest` é glibc,
+      # e o playwright.config.ts já espera este ambiente (reporter github, retries: 2).
+      # Só o chromium: é o único projeto declarado na config.
+      - name: Install chromium
+        run: npx playwright install --with-deps chromium
+
+      # O webServer da config builda e sobe o `vite preview` sozinho.
+      - name: Run e2e
+        run: npm run test:e2e
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
