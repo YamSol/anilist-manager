@@ -163,13 +163,16 @@ volta como conflito a cada `git pull`. O prefixo é propriedade de um alvo de de
 por fora:
 
 ```bash
-npm run build:pages                       # lê apps/web/.env.pages
-cp -r apps/web/dist/* ../seu-repo-pages/  # e commite lá
+npm run build:pages  # lê apps/web/.env.pages
 ```
 
 `build:pages` aplica o prefixo também ao `scope`/`start_url` do PWA e ao fallback de
 navegação do service worker. Para outro subcaminho, mude `apps/web/.env.pages` ou exporte
 `BASE_PATH`.
+
+O deploy é automático: `.github/workflows/pages.yml` roda `build:pages` a cada push em
+`master` e publica em <https://yamsol.github.io/anilist-manager/>. Rodar o build na mão só
+faz sentido para conferir o resultado antes de empurrar.
 
 ---
 
