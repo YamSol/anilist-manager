@@ -1,0 +1,71 @@
+# Deploy do site estático no GitHub Pages deste repositório.
+#
+# Substitui o passo manual que o README descrevia: `build:pages` e copiar o `dist/` na
+# mão para outro repositório. O prefixo de subcaminho vem de `apps/web/.env.pages`, lido
+# pelo `--mode pages` — nunca do `vite.config.ts`, que serviria a raiz nos outros alvos.
+name: Deploy Pages
+
+on:
+  push:
+    branches: ['master']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Um deploy em andamento termina: interromper na metade deixaria o site publicado num
+# estado parcial. Pushes novos esperam.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # `npm ci` dispara o `prepare`, que instala git hooks que não servem a um runner.
+  HUSKY: 0
+
+jobs:
+  build:
+    name: build:pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A versão vem de engines.node no package.json — fonte única de suporte.
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      # Aplica o prefixo também ao scope/start_url do PWA e ao navigateFallback do
+      # service worker — por isso é `build:pages`, e não `build`.
+      - name: Build
+        run: npm run build:pages
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
