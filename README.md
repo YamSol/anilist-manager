@@ -192,6 +192,12 @@ docker build -f deploy/Dockerfile -t anilist-manager .
 docker run --rm -p 3000:8080 anilist-manager
 ```
 
+Ou sem buildar nada, usando a imagem publicada a cada tag `v*`:
+
+```bash
+docker run --rm -p 3000:8080 ghcr.io/yamsol/anilist-manager:latest
+```
+
 O container escuta na 8080 e roda como usuário não-root; a porta publicada no host
 continua sendo a 3000, igual à v1. Lembre de cadastrar `http://localhost:3000` como
 Redirect URI da sua aplicação no AniList.
